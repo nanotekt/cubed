@@ -1,0 +1,100 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<!-- saved from url=(0077)https://www.greenarraychips.com/home/documents/pub/TUT002-hello-neighbor.html -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+   <title>TUT002-hello-neighbor</title>
+<link rel="stylesheet" type="text/css" href="./TUT002-hello-neighbor_files/gadoc.css">
+</head>
+<body>
+   
+<h1>Tutorial 002:  'Hello Neighbor' on a GreenArrays™ Chip</h1>
+
+<p>In the last tutorial we said 'Hello World' by toggling an IO pin. In this one we'll say instead 'Hello Neighbor' by toggling a neighbor's IO pin.
+
+</p><p>We learned the lesson last time that we need to initialize an index register like A or B before we can expect our data to go to the right place. We'll want to send data to our neighbor through the port we share with it. Let's start now with initializing the A register in node 500 to point to the port it shares with node 600. That would be the up port, as you can see if you look here:  <a href="https://www.greenarraychips.com/home/documents/bee/G144A12-poster-A1.pdf">GA144 Poster</a>. After executing <code class="t4">start</code> every <code class="t4">!</code> will move a word from the top of the stack into the up port.
+
+</p><table border="4" frame="border" rules="none">
+<tbody><tr>
+<td class="cf"><br><code class="t9">toggle 600.17 from</code><code class="df"> 500</code><code class="te"> cr<br></code><code class="df">600</code><code class="t9"> is my</code><code class="t1"> up</code><code class="t9"> neighbor&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br></code><br></td>
+<td>&nbsp;&nbsp;</td>
+<td class="cf">1122 list
+<br><code class="t9">toggle 600.17 from</code><code class="df"> 500</code><code class="d8"> 500</code><code class="t1"> node</code><code class="d8"> 0</code><code class="t1"> org</code><code class="t3"><br>start</code><code class="t4"> up a! ;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br></code><br></td>
+</tr>
+</tbody></table>
+
+<p>So how do we get our up neighbor, node 600, to do what we say? We know that he resets into a three port jump including the up port which we share. If we simply write an instruction word into the up port, node 600 will fetch that into his instruction register and execute it. We could look up the instructions in a data book and construct a number to write into the up port as a literal, but there's an easier way. Look at this:
+
+</p><table border="4" frame="border" rules="none">
+<tbody><tr>
+<td class="cf"><br><code class="t9">toggle 600.17 from</code><code class="df"> 500</code><code class="te"> cr<br></code><code class="df">600</code><code class="t9"> is my</code><code class="t1"> up</code><code class="t9"> neighbor</code><code class="t3"><br>start</code><code class="t9"> initialize registers</code><code class="t3"><br>hi</code><code class="t9"> set pin</code><code class="t3"><br>lo</code><code class="t9"> clear pin&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br></code><br></td>
+<td>&nbsp;&nbsp;</td>
+<td class="cf">1122 list
+<br><code class="t9">toggle 600.17 from</code><code class="df"> 500</code><code class="d8"> 500</code><code class="t1"> node</code><code class="d8"> 0</code><code class="t1"> org</code><code class="t3"><br>start</code><code class="t4"> up a! ;</code><code class="t3"><br>hi</code><code class="t4"> @p ! ..</code><code class="t9"> /</code><code class="t4"> @p !b ..</code><code class="t9"> /</code><code class="h6"> 30000</code><code class="t4"> ! ;</code><code class="t3"><br>lo</code><code class="t4"> @p ! ..</code><code class="t9"> /</code><code class="t4"> @p !b ..</code><code class="t9"> /</code><code class="h6"> 20000</code><code class="t4"> ! ;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br></code><br></td>
+</tr>
+</tbody></table>
+
+<p>The new word, <code class="t3">hi</code> first executes a <code class="t4">@p</code> which reads the following word in RAM onto the stack. The following word in RAM happens to contain <code class="t4">@p !b ..</code> so whatever literal was compiled by the phrase <code class="t4">@p !b ..</code> is what is fetched from RAM onto the stack. Now it's a simple matter to <code class="t4">!</code> that into the up port where it is fetched by the up neighbor, node 600, into his instruction register and executed. Finally a value for IO is sent, <code class="h6">30000</code> for <code class="t3">hi</code> and <code class="h6">20000</code> for <code class="t3">lo</code>. Note the fact that the numbers are dark green and italicized, meaning they are hexadecimal. Hex numbers in arrayForth are dark green, but italics only show up in html listings. The <code class="t4">..</code> pads the current instruction word with nops to be sure the next opcode goes into slot 0 of the next word.
+
+</p><p>The following is a memory dump taken from softsim showing what has been compiled so far. <code class="t3">start</code> occupies address 0 with the literal <code class="t4">up</code> (00145) in address 1. <code class="t3">hi</code> starts at address 2 and occupies the next four words. <code class="t3">lo</code> starts at address 6 and occupies four more words, for a total of 10 words of RAM.
+
+</p><blockquote><table>
+<tbody><tr>
+  <td valign="top">
+      <img src="./TUT002-hello-neighbor_files/mem1.png" alt="Memory Dump 1" title="Memory Dump 1"></td>
+</tr>
+</tbody></table></blockquote>
+
+<p>We're going to take a little detour here. <code class="t3">hi</code> and <code class="t3">lo</code> are identical except for the literals <code class="h6">20000</code> and <code class="h6">30000</code>. It's hard to let such redundancy get by. Let's factor out the part that sets the pin and let the number be a parameter, as follows.
+
+</p><table border="4" frame="border" rules="none">
+<tbody><tr>
+<td class="cf"><br><code class="t9">toggle 600.17 from</code><code class="df"> 500</code><code class="te"> cr<br></code><code class="df">600</code><code class="t9"> is my</code><code class="t1"> up</code><code class="t9"> neighbor</code><code class="t3"><br>start</code><code class="t9"> initialize registers</code><code class="t3"><br>pin!</code><code class="t9"> write to the io register</code><code class="t3"><br>hi</code><code class="t9"> set pin</code><code class="t3"><br>lo</code><code class="t9"> clear pin&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br></code><br></td>
+<td>&nbsp;&nbsp;</td>
+<td class="cf">1122 list
+<br><code class="t9">toggle 600.17 from</code><code class="df"> 500</code><code class="d8"> 500</code><code class="t1"> node</code><code class="d8"> 0</code><code class="t1"> org</code><code class="t3"><br>start</code><code class="t4"> up a! ;</code><code class="t3"><br>pin!</code><code class="t4"> @p ! ! ;</code><code class="t9"> /</code><code class="t4"> @p !b ..</code><code class="t9"> /</code><code class="t3"><br>hi</code><code class="h6"> 30000</code><code class="t4"> pin! ;</code><code class="t3"><br>lo</code><code class="h6"> 20000</code><code class="t4"> pin! ;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br></code><br></td>
+</tr>
+</tbody></table>
+
+<p>The total RAM used is now 7 words rather than 10 and the source code is clearer besides.
+
+</p><blockquote><table>
+<tbody><tr>
+  <td valign="top">
+      <img src="./TUT002-hello-neighbor_files/mem2.png" alt="Memory Dump 2" title="Memory Dump 2"></td>
+</tr>
+</tbody></table></blockquote>
+
+<p>Remember how last time we made sure that the B register pointed to IO? Let's do the same here, only it's node 600's B register that needs to be initialized. We need to tell node 600 to do the initialization, and we may as well do it in <code class="t3">start</code>.
+
+</p><table border="4" frame="border" rules="none">
+<tbody><tr>
+<td class="cf"><br><code class="t9">toggle 600.17 from</code><code class="df"> 500</code><code class="te"> cr<br></code><code class="df">600</code><code class="t9"> is my</code><code class="t1"> up</code><code class="t9"> neighbor</code><code class="t3"><br>start</code><code class="t9"> initialize registers</code><code class="t3"><br>pin!</code><code class="t9"> write to the io register</code><code class="t3"><br>hi</code><code class="t9"> set pin</code><code class="t3"><br>lo</code><code class="t9"> clear pin&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br></code><br></td>
+<td>&nbsp;&nbsp;</td>
+<td class="cf">1122 list
+<br><code class="t9">toggle 600.17 from</code><code class="df"> 500</code><code class="d8"> 500</code><code class="t1"> node</code><code class="d8"> 0</code><code class="t1"> org</code><code class="t3"><br>start</code><code class="t4"> up a! @p ..</code><code class="t9"> /</code><code class="t4"> @p b! ..</code><code class="t9"> /</code><code class="t4"> ! io ! ;</code><code class="t3"><br>pin!</code><code class="t4"> @p ! ! ;</code><code class="t9"> /</code><code class="t4"> @p !b ..</code><code class="t9"> /</code><code class="t3"><br>hi</code><code class="h6"> 30000</code><code class="t4"> pin! ;</code><code class="t3"><br>lo</code><code class="h6"> 20000</code><code class="t4"> pin! ;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br></code><br></td>
+</tr>
+</tbody></table>
+
+<p>The instruction word being sent to node 600 says <code class="t4">b!</code> instead of <code class="t4">!b</code> in order to initialize B instead of writing to where B points.
+
+</p><p>The only thing left is to write the loop and let <code class="t3">start</code> fall through into it. Also we need the address of <code class="t3">start</code> so that we can set the softsim entry point for node 500 in block 942, in this case with <code class="t1">6 500 enter</code>.
+
+</p><table border="4" frame="border" rules="none">
+<tbody><tr>
+<td class="cf"><br><code class="t9">toggle 600.17 from</code><code class="df"> 500</code><code class="te"> cr<br></code><code class="df">600</code><code class="t9"> is my</code><code class="t1"> up</code><code class="t9"> neighbor</code><code class="t3"><br>pin!</code><code class="t9"> write to the io register</code><code class="t3"><br>hi</code><code class="t9"> set pin</code><code class="t3"><br>lo</code><code class="t9"> clear pin</code><code class="t3"><br>start</code><code class="t9"> initialize registers and go</code><code class="t3"><br>go</code><code class="t9"> repeatedly toggle pin 600.17&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br></code><br></td>
+<td>&nbsp;&nbsp;</td>
+<td class="cf">1122 list
+<br><code class="t9">toggle 600.17 from</code><code class="df"> 500</code><code class="d8"> 500</code><code class="t1"> node</code><code class="d8"> 0</code><code class="t1"> org</code><code class="t3"><br>pin!</code><code class="t4"> @p ! ! ;</code><code class="t9"> /</code><code class="t4"> @p !b ..</code><code class="t9"> /</code><code class="t3"><br>hi</code><code class="h6"> 30000</code><code class="t4"> pin! ;</code><code class="t3"><br>lo</code><code class="h6"> 20000</code><code class="t4"> pin! ;</code><code class="t3"><br>start</code><code class="hd"> 006</code><code class="t4"> up a! @p ..</code><code class="t9"> /</code><code class="t4"> @p b! ..</code><code class="t9"> /</code><code class="t4"> ! io !</code><code class="t3"><br>go</code><code class="t4"> hi lo go ;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<br></code><br></td>
+</tr>
+</tbody></table>
+
+<blockquote><table>
+<tbody><tr>
+  <td valign="top">
+      <img src="./TUT002-hello-neighbor_files/mem3.png" alt="Memory Dump 3" title="Memory Dump 3"></td>
+</tr>
+</tbody></table></blockquote>
+
+<p>Look, a total of 13 words of RAM. Not bad.
+
+
+</p></body></html>

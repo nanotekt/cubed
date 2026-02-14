@@ -1,0 +1,52 @@
+body{
+  font-family:sans-serif;
+}
+
+td{ }
+.cf{ vertical-align:top;
+ background-color:white;
+ white-space:nowrap;
+ font-family:lucida console,monospace;
+ font-size:0.8em;
+ font-weight:bold;}
+
+code,tt,kbd,samp{
+  font-family:'lucida console',monospace;
+  font-size:1em;
+}
+
+div.code{
+  margin:0.5em 0em 0.5em 1em; /*top right bottom left*/
+  font-family:'lucida console',monospace;
+  font-size:1.5em;
+  font-weight:bold;
+  text-transform:lowercase;
+  white-space:nowrap;
+}
+
+.t1{color:#ddaa00;}                            /*yellow  execute word*/
+.h2{color:#aa7700; font-style:italic;}         /*yellowd execute long number*/
+.d2{color:#ddaa00;}                            /*yellow  execute long number*/
+.t3{color:#ff0000;}                            /*red     define word*/
+.t4{color:#00cc00;}                            /*green   compile word*/
+.h5{color:#009900; font-style:italic;}         /*greend  compile long number*/
+.d5{color:#00cc00;}                            /*green   compile long number*/
+.h6{color:#009900; font-style:italic;}         /*greend  compile short number*/
+.d6{color:#00cc00;}                            /*green   compile short number*/
+.t7{color:#00cccc;}                            /*cyan    compile macro*/
+.h8{color:#aa7700; font-style:italic;}         /*yellowd execute short number*/
+.d8{color:#ddaa00;}                            /*yellow  execute short number*/
+.t9{color:#444444;}                            /*greyd   lowercase text comment*/
+.ta{color:#000000; text-transform:capitalize;} /*black   Capitalized Text Comment*/
+.tb{color:#000000; text-transform:uppercase;}  /*black   UPPERCASE TEXT COMMENT*/
+.tc{color:#ff00ff;}                            /*magenta variable*/
+.dc{color:#00ff00;}                            /*green   variable*/
+.hd{color:#bbbbbb; font-style:italic;}         /*grey    target address*/
+.te{color:#0000ff;}                            /*blue    editor command*/
+.hf{color:#777777; font-style:italic;}         /*grey    short number comment*/
+.df{color:#444444;}                            /*greyd   short number comment*/
+
+.t1,.h2,.d2,.t3,.t4,.h5,.d5,.h6,.d6,.t7,.h8,.d8,.t9,.ta,.tb,.tc,.dc,.hd,.te,.hf,.df{
+  font-weight:bold;
+} /*bold outside div.code*/
+
