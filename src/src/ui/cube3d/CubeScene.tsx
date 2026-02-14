@@ -1,4 +1,7 @@
+import { useEffect, useRef } from 'react';
+import { useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
+import * as THREE from 'three';
 import type { SceneGraph } from './layoutEngine';
 import { DefinitionCube } from './objects/DefinitionCube';
 import { ApplicationCube } from './objects/ApplicationCube';
@@ -7,15 +10,57 @@ import { LiteralCube } from './objects/LiteralCube';
 import { PlaneBox } from './objects/PlaneBox';
 import { Pipe } from './objects/Pipe';
 
+/** Resets camera to frame the current scene graph whenever resetKey changes */
+function CameraReset({ sceneGraph, resetKey }: { sceneGraph: SceneGraph; resetKey: number }) {
+  const { camera, controls } = useThree();
+  const initialReset = useRef(true);
+
+  useEffect(() => {
+    if (sceneGraph.nodes.length === 0) return;
+
+    // Compute bounding box of all nodes
+    const box = new THREE.Box3();
+    for (const node of sceneGraph.nodes) {
+      const [x, y, z] = node.position;
+      const [w, h, d] = node.size;
+      box.expandByPoint(new THREE.Vector3(x - w / 2, y - h / 2, z - d / 2));
+      box.expandByPoint(new THREE.Vector3(x + w / 2, y + h / 2, z + d / 2));
+    }
+
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z, 2);
+    const dist = maxDim * 1.5;
+
+    // Position camera looking at center from a 45-degree angle
+    camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.7);
+    camera.lookAt(center);
+
+    // Update orbit controls target
+    if (controls && 'target' in controls) {
+      (controls as any).target.copy(center);
+      (controls as any).update();
+    }
+
+    initialReset.current = false;
+  }, [resetKey, sceneGraph, camera, controls]);
+
+  return null;
+}
+
 interface CubeSceneProps {
   sceneGraph: SceneGraph;
   selectedId: string | null;
   hoveredId: string | null;
   onHover: (id: string | null) => void;
   onClick: (id: string) => void;
+  onDoubleClick: (id: string) => void;
+  resetKey: number;
 }
 
-export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick }: CubeSceneProps) {
+export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick, onDoubleClick, resetKey }: CubeSceneProps) {
   const activeId = hoveredId ?? selectedId;
 
   return (
@@ -28,6 +73,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick 
         minDistance={2}
         maxDistance={30}
       />
+      <CameraReset sceneGraph={sceneGraph} resetKey={resetKey} />
 
       {/* Lighting */}
       <ambientLight intensity={0.4} />
@@ -57,6 +103,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick 
                 selected={node.id === activeId}
                 onHover={onHover}
                 onClick={onClick}
+                onDoubleClick={onDoubleClick}
               />
             );
           case 'application':
@@ -67,6 +114,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick 
                 selected={node.id === activeId}
                 onHover={onHover}
                 onClick={onClick}
+                onDoubleClick={onDoubleClick}
               />
             );
           case 'holder':
@@ -77,6 +125,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick 
                 selected={node.id === activeId}
                 onHover={onHover}
                 onClick={onClick}
+                onDoubleClick={onDoubleClick}
               />
             );
           case 'literal':
@@ -87,6 +136,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick 
                 selected={node.id === activeId}
                 onHover={onHover}
                 onClick={onClick}
+                onDoubleClick={onDoubleClick}
               />
             );
           case 'plane':

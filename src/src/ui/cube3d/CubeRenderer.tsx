@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, IconButton } from '@mui/material';
 import type { CubeProgram } from '../../core/cube/ast';
-import { layoutAST } from './layoutEngine';
+import { layoutAST, filterSceneGraph } from './layoutEngine';
 import type { SceneNode } from './layoutEngine';
 import { CubeScene } from './CubeScene';
 
@@ -13,17 +13,59 @@ interface CubeRendererProps {
 export function CubeRenderer({ ast }: CubeRendererProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [focusStack, setFocusStack] = useState<string[]>([]);
 
-  const sceneGraph = useMemo(() => {
-    if (!ast) return { nodes: [], pipes: [] };
-    const sg = layoutAST(ast);
-    console.log('[CubeRenderer] layoutAST produced', sg.nodes.length, 'nodes,', sg.pipes.length, 'pipes');
-    return sg;
+  // Reset focus when AST changes (new compilation)
+  useEffect(() => {
+    setFocusStack([]);
+    setSelectedId(null);
+    setHoveredId(null);
+    setCameraResetKey(k => k + 1);
   }, [ast]);
+
+  const fullSceneGraph = useMemo(() => {
+    if (!ast) return { nodes: [], pipes: [] };
+    return layoutAST(ast);
+  }, [ast]);
+
+  // Apply focus filtering
+  const sceneGraph = useMemo(() => {
+    if (focusStack.length === 0) return fullSceneGraph;
+    const focusId = focusStack[focusStack.length - 1];
+    return filterSceneGraph(fullSceneGraph, focusId);
+  }, [fullSceneGraph, focusStack]);
+
+  const focusedLabel = useMemo(() => {
+    if (focusStack.length === 0) return null;
+    const focusId = focusStack[focusStack.length - 1];
+    const node = fullSceneGraph.nodes.find(n => n.id === focusId);
+    return node?.label ?? focusId;
+  }, [fullSceneGraph, focusStack]);
 
   const hoveredNode: SceneNode | undefined = hoveredId
     ? sceneGraph.nodes.find(n => n.id === hoveredId)
     : undefined;
+
+  // Incremented to trigger camera reset on focus change
+  const [cameraResetKey, setCameraResetKey] = useState(0);
+
+  const handleDoubleClick = useCallback((id: string) => {
+    // Check if the node has children in the full scene graph
+    const hasChildren = fullSceneGraph.nodes.some(n => n.parentId === id);
+    if (hasChildren) {
+      setFocusStack(prev => [...prev, id]);
+      setSelectedId(null);
+      setHoveredId(null);
+      setCameraResetKey(k => k + 1);
+    }
+  }, [fullSceneGraph]);
+
+  const handleBack = useCallback(() => {
+    setFocusStack(prev => prev.slice(0, -1));
+    setSelectedId(null);
+    setHoveredId(null);
+    setCameraResetKey(k => k + 1);
+  }, []);
 
   if (!ast) {
     return (
@@ -53,8 +95,42 @@ export function CubeRenderer({ ast }: CubeRendererProps) {
           hoveredId={hoveredId}
           onHover={setHoveredId}
           onClick={setSelectedId}
+          onDoubleClick={handleDoubleClick}
+          resetKey={cameraResetKey}
         />
       </Canvas>
+
+      {/* Focus breadcrumb / back button */}
+      {focusStack.length > 0 && (
+        <Box sx={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          bgcolor: 'rgba(0,0,0,0.85)',
+          color: '#fff',
+          px: 1.5,
+          py: 0.5,
+          borderRadius: 1,
+          border: '1px solid #555',
+        }}>
+          <IconButton
+            size="small"
+            onClick={handleBack}
+            sx={{ color: '#aaa', p: 0.5, '&:hover': { color: '#fff' } }}
+          >
+            <Typography sx={{ fontSize: '14px', lineHeight: 1 }}>{'<'}</Typography>
+          </IconButton>
+          <Typography variant="caption" sx={{ color: '#88ff88', fontSize: '11px' }}>
+            {focusedLabel}
+          </Typography>
+          <Typography variant="caption" sx={{ color: '#666', fontSize: '9px', ml: 0.5 }}>
+            (dbl-click to drill, {'<'} to go back)
+          </Typography>
+        </Box>
+      )}
 
       {/* Tooltip overlay */}
       {hoveredNode && (

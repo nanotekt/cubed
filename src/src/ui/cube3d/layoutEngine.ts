@@ -48,6 +48,8 @@ export interface PipeInfo {
   from: [number, number, number];
   to: [number, number, number];
   color: string;
+  fromNodeId?: string;
+  toNodeId?: string;
 }
 
 export interface SceneGraph {
@@ -87,6 +89,59 @@ function nextId(prefix: string): string {
   return `${prefix}_${idCounter++}`;
 }
 
+// ---- Scene graph filtering (for focus/drill-down) ----
+
+/** Collect all descendant node IDs of a given node (recursive via parentId) */
+export function getDescendantIds(nodes: SceneNode[], rootId: string): Set<string> {
+  const ids = new Set<string>();
+  ids.add(rootId);
+  let added = true;
+  while (added) {
+    added = false;
+    for (const node of nodes) {
+      if (node.parentId && ids.has(node.parentId) && !ids.has(node.id)) {
+        ids.add(node.id);
+        added = true;
+      }
+    }
+  }
+  return ids;
+}
+
+/** Filter a scene graph to only include a node and its descendants + connected pipes */
+export function filterSceneGraph(sg: SceneGraph, focusId: string): SceneGraph {
+  const nodeIds = getDescendantIds(sg.nodes, focusId);
+
+  const filteredNodes = sg.nodes.filter(n => nodeIds.has(n.id));
+  const filteredPipes = sg.pipes.filter(p =>
+    (p.fromNodeId && nodeIds.has(p.fromNodeId)) ||
+    (p.toNodeId && nodeIds.has(p.toNodeId))
+  );
+
+  // Re-center around the focused node's position
+  const focusNode = sg.nodes.find(n => n.id === focusId);
+  if (focusNode) {
+    const [ox, oy, oz] = focusNode.position;
+    return {
+      nodes: filteredNodes.map(n => ({
+        ...n,
+        position: [n.position[0] - ox, n.position[1] - oy, n.position[2] - oz] as [number, number, number],
+        ports: n.ports.map(p => ({
+          ...p,
+          worldPos: [p.worldPos[0] - ox, p.worldPos[1] - oy, p.worldPos[2] - oz] as [number, number, number],
+        })),
+      })),
+      pipes: filteredPipes.map(p => ({
+        ...p,
+        from: [p.from[0] - ox, p.from[1] - oy, p.from[2] - oz] as [number, number, number],
+        to: [p.to[0] - ox, p.to[1] - oy, p.to[2] - oz] as [number, number, number],
+      })),
+    };
+  }
+
+  return { nodes: filteredNodes, pipes: filteredPipes };
+}
+
 // ---- Layout constants ----
 
 const ITEM_SPACING_X = 2.5;
@@ -104,8 +159,9 @@ export function layoutAST(program: CubeProgram): SceneGraph {
   const nodes: SceneNode[] = [];
   const pipes: PipeInfo[] = [];
   const holderPositions = new Map<string, [number, number, number]>();
+  const holderNodeIds = new Map<string, string>(); // variable name → node id
 
-  layoutConjunction(program.conjunction, [0, 0, 0], nodes, pipes, holderPositions);
+  layoutConjunction(program.conjunction, [0, 0, 0], nodes, pipes, holderPositions, holderNodeIds);
 
   return { nodes, pipes };
 }
@@ -118,11 +174,13 @@ function layoutConjunction(
   nodes: SceneNode[],
   pipes: PipeInfo[],
   holderPositions: Map<string, [number, number, number]>,
+  holderNodeIds: Map<string, string>,
+  parentId?: string,
 ): number {
   let xCursor = origin[0];
 
   for (const item of conj.items) {
-    const width = layoutItem(item, [xCursor, origin[1], origin[2]], nodes, pipes, holderPositions);
+    const width = layoutItem(item, [xCursor, origin[1], origin[2]], nodes, pipes, holderPositions, holderNodeIds, parentId);
     xCursor += width + ITEM_SPACING_X;
   }
 
@@ -137,14 +195,16 @@ function layoutItem(
   nodes: SceneNode[],
   pipes: PipeInfo[],
   holderPositions: Map<string, [number, number, number]>,
+  holderNodeIds: Map<string, string>,
+  parentId?: string,
 ): number {
   switch (item.kind) {
     case 'predicate_def':
-      return layoutPredicateDef(item, pos, nodes, pipes, holderPositions);
+      return layoutPredicateDef(item, pos, nodes, pipes, holderPositions, holderNodeIds, parentId);
     case 'application':
-      return layoutApplication(item, pos, nodes, pipes, holderPositions);
+      return layoutApplication(item, pos, nodes, pipes, holderPositions, holderNodeIds, parentId);
     case 'unification':
-      return layoutUnification(item, pos, nodes, pipes, holderPositions);
+      return layoutUnification(item, pos, nodes, pipes, holderPositions, holderNodeIds, parentId);
     case 'type_def':
       // Type defs are compile-time only; render as a small label
       nodes.push({
@@ -156,6 +216,7 @@ function layoutItem(
         color: COLORS.unknown,
         transparent: true,
         opacity: 0.3,
+        parentId,
         ports: [],
       });
       return 1.2;
@@ -170,6 +231,8 @@ function layoutPredicateDef(
   nodes: SceneNode[],
   pipes: PipeInfo[],
   holderPositions: Map<string, [number, number, number]>,
+  holderNodeIds: Map<string, string>,
+  parentId?: string,
 ): number {
   const defId = nextId('def');
   const clauseNodes: SceneNode[][] = [];
@@ -188,7 +251,7 @@ function layoutPredicateDef(
     ];
 
     const width = layoutConjunction(
-      def.clauses[i], innerOrigin, clauseSceneNodes, clauseScenePipes, holderPositions,
+      def.clauses[i], innerOrigin, clauseSceneNodes, clauseScenePipes, holderPositions, holderNodeIds, defId,
     );
     maxClauseWidth = Math.max(maxClauseWidth, width);
     clauseNodes.push(clauseSceneNodes);
@@ -253,6 +316,7 @@ function layoutPredicateDef(
     color: COLORS.definition,
     transparent: true,
     opacity: 0.2,
+    parentId,
     ports,
   });
 
@@ -271,6 +335,8 @@ function layoutApplication(
   nodes: SceneNode[],
   pipes: PipeInfo[],
   holderPositions: Map<string, [number, number, number]>,
+  holderNodeIds: Map<string, string>,
+  parentId?: string,
 ): number {
   if (app.functor === '__node') return 0; // node directive is invisible
 
@@ -308,6 +374,7 @@ function layoutApplication(
     color,
     transparent: false,
     opacity: 1,
+    parentId,
     ports,
   });
 
@@ -315,7 +382,7 @@ function layoutApplication(
   for (let i = 0; i < app.args.length; i++) {
     const arg = app.args[i];
     const port = ports[i];
-    layoutTermForPort(arg.value, port, pos, nodes, pipes, holderPositions);
+    layoutTermForPort(arg.value, port, appId, pos, nodes, pipes, holderPositions, holderNodeIds, parentId);
   }
 
   return APP_SIZE;
@@ -329,6 +396,8 @@ function layoutUnification(
   nodes: SceneNode[],
   pipes: PipeInfo[],
   holderPositions: Map<string, [number, number, number]>,
+  holderNodeIds: Map<string, string>,
+  parentId?: string,
 ): number {
   // Left holder for the variable
   const holderId = nextId('holder');
@@ -343,14 +412,16 @@ function layoutUnification(
     color: COLORS.holder,
     transparent: true,
     opacity: 0.5,
+    parentId,
     ports: [],
   });
 
   holderPositions.set(uni.variable, holderPos);
+  holderNodeIds.set(uni.variable, holderId);
 
   // Right side: the term
   const termPos: [number, number, number] = [pos[0] + 1.5, pos[1], pos[2]];
-  const termEnd = layoutTerm(uni.term, termPos, nodes, pipes, holderPositions);
+  const termNodeId = layoutTerm(uni.term, termPos, nodes, pipes, holderPositions, holderNodeIds, parentId);
 
   // Pipe from holder to term
   pipes.push({
@@ -358,27 +429,33 @@ function layoutUnification(
     from: holderPos,
     to: termPos,
     color: COLORS.pipe,
+    fromNodeId: holderId,
+    toNodeId: termNodeId ?? undefined,
   });
 
-  return 1.5 + termEnd;
+  return 1.5 + HOLDER_SIZE;
 }
 
 // ---- Term layout (for standalone terms) ----
 
+/** Returns the node ID of the created node (or null if no node was created) */
 function layoutTerm(
   term: Term,
   pos: [number, number, number],
   nodes: SceneNode[],
   pipes: PipeInfo[],
   holderPositions: Map<string, [number, number, number]>,
-): number {
+  holderNodeIds: Map<string, string>,
+  parentId?: string,
+): string | null {
   switch (term.kind) {
     case 'var': {
       const existing = holderPositions.get(term.name);
       if (existing) {
         // Pipe to existing holder
-        pipes.push({ id: nextId('pipe'), from: pos, to: existing, color: COLORS.pipe });
-        return 0;
+        const existingNodeId = holderNodeIds.get(term.name);
+        pipes.push({ id: nextId('pipe'), from: pos, to: existing, color: COLORS.pipe, toNodeId: existingNodeId });
+        return existingNodeId ?? null;
       }
       // New holder
       const holderId = nextId('holder');
@@ -391,14 +468,17 @@ function layoutTerm(
         color: COLORS.holder,
         transparent: true,
         opacity: 0.5,
+        parentId,
         ports: [],
       });
       holderPositions.set(term.name, pos);
-      return HOLDER_SIZE;
+      holderNodeIds.set(term.name, holderId);
+      return holderId;
     }
     case 'literal': {
+      const litId = nextId('lit');
       nodes.push({
-        id: nextId('lit'),
+        id: litId,
         type: 'literal',
         label: String(term.value),
         position: pos,
@@ -406,9 +486,10 @@ function layoutTerm(
         color: COLORS.literal,
         transparent: false,
         opacity: 1,
+        parentId,
         ports: [],
       });
-      return LITERAL_SIZE;
+      return litId;
     }
     case 'app_term': {
       // Treat as inline application
@@ -418,10 +499,12 @@ function layoutTerm(
         args: term.args,
         loc: term.loc,
       };
-      return layoutApplication(inlineApp, pos, nodes, pipes, holderPositions);
+      layoutApplication(inlineApp, pos, nodes, pipes, holderPositions, holderNodeIds, parentId);
+      // The application node was just added as the last node
+      return nodes[nodes.length - 1]?.id ?? null;
     }
     case 'rename':
-      return 0; // Rename terms are structural, not visual
+      return null; // Rename terms are structural, not visual
   }
 }
 
@@ -430,10 +513,13 @@ function layoutTerm(
 function layoutTermForPort(
   term: Term,
   port: PortInfo,
+  appNodeId: string,
   parentPos: [number, number, number],
   nodes: SceneNode[],
   pipes: PipeInfo[],
   holderPositions: Map<string, [number, number, number]>,
+  holderNodeIds: Map<string, string>,
+  parentId?: string,
 ): void {
   const offset = port.side === 'right' ? 1.2 : -1.2;
   const termPos: [number, number, number] = [
@@ -447,7 +533,8 @@ function layoutTermForPort(
       const existing = holderPositions.get(term.name);
       if (existing) {
         // Pipe from port to existing holder
-        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: existing, color: COLORS.pipe });
+        const existingNodeId = holderNodeIds.get(term.name);
+        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: existing, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: existingNodeId });
       } else {
         // New holder
         const holderId = nextId('holder');
@@ -460,16 +547,19 @@ function layoutTermForPort(
           color: COLORS.holder,
           transparent: true,
           opacity: 0.5,
+          parentId,
           ports: [],
         });
         holderPositions.set(term.name, termPos);
-        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe });
+        holderNodeIds.set(term.name, holderId);
+        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: holderId });
       }
       break;
     }
     case 'literal': {
+      const litId = nextId('lit');
       nodes.push({
-        id: nextId('lit'),
+        id: litId,
         type: 'literal',
         label: String(term.value),
         position: termPos,
@@ -477,9 +567,10 @@ function layoutTermForPort(
         color: COLORS.literal,
         transparent: false,
         opacity: 1,
+        parentId,
         ports: [],
       });
-      pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe });
+      pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: litId });
       break;
     }
     case 'app_term': {
@@ -489,8 +580,9 @@ function layoutTermForPort(
         args: term.args,
         loc: term.loc,
       };
-      layoutApplication(inlineApp, termPos, nodes, pipes, holderPositions);
-      pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe });
+      layoutApplication(inlineApp, termPos, nodes, pipes, holderPositions, holderNodeIds, parentId);
+      const inlineAppNodeId = nodes[nodes.length - 1]?.id;
+      pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: inlineAppNodeId });
       break;
     }
     case 'rename':

@@ -6,15 +6,17 @@ interface ApplicationCubeProps {
   selected: boolean;
   onHover: (id: string | null) => void;
   onClick: (id: string) => void;
+  onDoubleClick: (id: string) => void;
 }
 
-export function ApplicationCube({ node, selected, onHover, onClick }: ApplicationCubeProps) {
+export function ApplicationCube({ node, selected, onHover, onClick, onDoubleClick }: ApplicationCubeProps) {
   return (
     <group position={node.position}>
       <mesh
         onPointerOver={() => onHover(node.id)}
         onPointerOut={() => onHover(null)}
         onClick={() => onClick(node.id)}
+        onDoubleClick={() => onDoubleClick(node.id)}
       >
         <boxGeometry args={node.size} />
         <meshStandardMaterial
