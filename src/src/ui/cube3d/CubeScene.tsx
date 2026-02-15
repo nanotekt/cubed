@@ -183,7 +183,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick,
         enableDamping
         dampingFactor={0.1}
         minDistance={2}
-        maxDistance={30}
+        maxDistance={100}
       />
       <CameraReset sceneGraph={sceneGraph} resetKey={resetKey} />
 

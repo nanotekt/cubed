@@ -85,6 +85,60 @@ function makeBuiltinSchemes(): Map<string, TypeScheme> {
     },
   });
 
+  // band, bor, bxor: {a:Int, b:Int, c:Int} -> o
+  for (const name of ['band', 'bor', 'bxor']) {
+    schemes.set(name, {
+      quantified: new Set(),
+      type: {
+        kind: 'tfunc',
+        params: new Map([['a', tInt], ['b', tInt], ['c', tInt]]),
+        returnType: tProp,
+      },
+    });
+  }
+
+  // bnot: {a:Int, b:Int} -> o
+  schemes.set('bnot', {
+    quantified: new Set(),
+    type: {
+      kind: 'tfunc',
+      params: new Map([['a', tInt], ['b', tInt]]),
+      returnType: tProp,
+    },
+  });
+
+  // shl, shr: {a:Int, n:Int, c:Int} -> o
+  for (const name of ['shl', 'shr']) {
+    schemes.set(name, {
+      quantified: new Set(),
+      type: {
+        kind: 'tfunc',
+        params: new Map([['a', tInt], ['n', tInt], ['c', tInt]]),
+        returnType: tProp,
+      },
+    });
+  }
+
+  // send: {port:Int, value:Int} -> o
+  schemes.set('send', {
+    quantified: new Set(),
+    type: {
+      kind: 'tfunc',
+      params: new Map([['port', tInt], ['value', tInt]]),
+      returnType: tProp,
+    },
+  });
+
+  // recv: {port:Int, value:Int} -> o
+  schemes.set('recv', {
+    quantified: new Set(),
+    type: {
+      kind: 'tfunc',
+      params: new Map([['port', tInt], ['value', tInt]]),
+      returnType: tProp,
+    },
+  });
+
   return schemes;
 }
 

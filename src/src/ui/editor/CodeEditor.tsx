@@ -185,6 +185,106 @@ p = pair{fst=intval, snd=42}
 equal{a=intval, b=1}
 `,
 
+'MD5 Multi-Node': `-- MD5 Multi-Node Hash (AN001 Partner Pattern)
+-- Low-16 partner node: handles bits 0-15 of 32-bit values.
+-- Sends carry to high-16 partner via UP port after accumulation.
+--
+-- Architecture (GreenArrays AN001):
+--   Node 205 (this): low 16 bits, sends carry up
+--   Node 305:        high 16 bits, receives carry from below
+--
+-- Uses: type definitions, multi-clause dispatch, bitwise builtins,
+--       port I/O for inter-node carry propagation.
+
+node 205
+
+/\\
+
+-- Round function selector (sum type → pattern-matched dispatch)
+RoundType = Lambda{}. fround + ground + hround + iround
+
+/\\
+
+-- MD5 F(x,y,z) = (x AND y) OR (NOT x AND z)
+-- Used in rounds 0-15
+md5f = lambda{x:Int, y:Int, z:Int, r:Int}.
+  (band{a=x, b=y, c=xy} /\\
+   bnot{a=x, b=nx} /\\
+   band{a=nx, b=z, c=nxz} /\\
+   bor{a=xy, b=nxz, c=r})
+
+/\\
+
+-- MD5 G(x,y,z) = (x AND z) OR (y AND NOT z)
+-- Used in rounds 16-31
+md5g = lambda{x:Int, y:Int, z:Int, r:Int}.
+  (band{a=x, b=z, c=xz} /\\
+   bnot{a=z, b=nz} /\\
+   band{a=y, b=nz, c=ynz} /\\
+   bor{a=xz, b=ynz, c=r})
+
+/\\
+
+-- MD5 H(x,y,z) = x XOR y XOR z
+-- Used in rounds 32-47
+md5h = lambda{x:Int, y:Int, z:Int, r:Int}.
+  (bxor{a=x, b=y, c=xy} /\\
+   bxor{a=xy, b=z, c=r})
+
+/\\
+
+-- MD5 I(x,y,z) = y XOR (x OR NOT z)
+-- Used in rounds 48-63
+md5i = lambda{x:Int, y:Int, z:Int, r:Int}.
+  (bnot{a=z, b=nz} /\\
+   bor{a=x, b=nz, c=xnz} /\\
+   bxor{a=y, b=xnz, c=r})
+
+/\\
+
+-- Round function dispatch: pattern match on RoundType tag
+roundfn = lambda{rtype:RoundType, x:Int, y:Int, z:Int, r:Int}.
+  (rtype = fround /\\ md5f{x=x, y=y, z=z, r=r}
+   \\/
+   rtype = ground /\\ md5g{x=x, y=y, z=z, r=r}
+   \\/
+   rtype = hround /\\ md5h{x=x, y=y, z=z, r=r}
+   \\/
+   rtype = iround /\\ md5i{x=x, y=y, z=z, r=r})
+
+/\\
+
+-- One MD5 step on the low-16 partner node:
+--   1. Compute round function f(b,c,d)
+--   2. Accumulate: temp = a + f + msg + constant
+--   3. Extract carry (bits 16-17), send to high partner
+--   4. Mask to 16 bits, add b for final result
+md5step = lambda{a:Int, b:Int, c:Int, d:Int,
+                  msg:Int, kon:Int, rtype:RoundType, out:Int}.
+  (roundfn{rtype=rtype, x=b, y=c, z=d, r=fval} /\\
+   plus{a=a, b=fval, c=s1} /\\
+   plus{a=s1, b=msg, c=s2} /\\
+   plus{a=s2, b=kon, c=s3} /\\
+   shr{a=s3, n=16, c=carry} /\\
+   send{port=0x145, value=carry} /\\
+   band{a=s3, b=0xFFFF, c=masked} /\\
+   plus{a=masked, b=b, c=out})
+
+/\\
+
+-- Execute first MD5 F-round step on empty message
+-- Initial MD5 state (low 16 bits of standard IV):
+--   A=0x2301  B=0xAB89  C=0xDCFE  D=0x5476
+-- T[0] low 16 bits = 0xA478
+-- Message word M[0] = 0x0080 (padding bit for empty input)
+rt = fround
+
+/\\
+
+md5step{a=0x2301, b=0xAB89, c=0xDCFE, d=0x5476,
+        msg=0x0080, kon=0xA478, rtype=rt, out=result}
+`,
+
 };
 
 const CUBE_SAMPLE_NAMES = Object.keys(CUBE_SAMPLES);

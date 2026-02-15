@@ -53,6 +53,16 @@ const BUILTIN_PARAMS: Record<string, string[]> = {
   greater: ['a', 'b'],
   not:     ['goal'],
   equal:   ['a', 'b'],
+  // Bitwise operations
+  band:    ['a', 'b', 'c'],    // c = a AND b
+  bor:     ['a', 'b', 'c'],    // c = a OR b  (synthesized via DeMorgan)
+  bxor:    ['a', 'b', 'c'],    // c = a XOR b
+  bnot:    ['a', 'b'],         // b = NOT a
+  shl:     ['a', 'n', 'c'],    // c = a << n  (n must be literal)
+  shr:     ['a', 'n', 'c'],    // c = a >> n  (n must be literal)
+  // Port I/O
+  send:    ['port', 'value'],  // blocking write to port
+  recv:    ['port', 'value'],  // blocking read from port
 };
 
 // F18A opcode names mapped to clean identifiers

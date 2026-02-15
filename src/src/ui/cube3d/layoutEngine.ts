@@ -78,7 +78,11 @@ const COLORS = {
   unknown: '#888888',
 };
 
-const BUILTINS = new Set(['plus', 'minus', 'times', 'greater', 'not', 'equal']);
+const BUILTINS = new Set([
+  'plus', 'minus', 'times', 'greater', 'not', 'equal',
+  'band', 'bor', 'bxor', 'bnot', 'shl', 'shr',
+  'send', 'recv',
+]);
 
 function appColor(functor: string): string {
   if (BUILTINS.has(functor)) return COLORS.builtin;
@@ -151,6 +155,7 @@ export function filterSceneGraph(sg: SceneGraph, focusId: string): SceneGraph {
 // ---- Layout constants ----
 
 const ITEM_SPACING_X = 2.5;
+const ITEM_SPACING_Z = 3.5; // spacing between top-level items along depth
 const CLAUSE_SPACING_Y = 2.0;
 const DEF_PADDING = 0.5;
 const APP_SIZE = 1.0;
@@ -177,12 +182,14 @@ export function layoutAST(program: CubeProgram): SceneGraph {
     }
   }
 
-  layoutConjunction(program.conjunction, [0, 0, 0], nodes, pipes, holderPositions, holderNodeIds, undefined, constructorNames);
+  layoutConjunction(program.conjunction, [0, 0, 0], nodes, pipes, holderPositions, holderNodeIds, undefined, constructorNames, true);
 
   return { nodes, pipes };
 }
 
-// ---- Conjunction layout (items along X) ----
+// ---- Conjunction layout ----
+// Top-level: items along Z (depth), each definition gets its own row.
+// Nested (inside a predicate clause): items along X (horizontal AND).
 
 function layoutConjunction(
   conj: Conjunction,
@@ -193,7 +200,19 @@ function layoutConjunction(
   holderNodeIds: Map<string, string>,
   parentId?: string,
   constructorNames?: Set<string>,
+  topLevel: boolean = false,
 ): number {
+  if (topLevel) {
+    // Top-level: lay items out along Z axis to avoid overlap
+    let zCursor = origin[2];
+    for (const item of conj.items) {
+      layoutItem(item, [origin[0], origin[1], zCursor], nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
+      zCursor += ITEM_SPACING_Z;
+    }
+    return 0; // width not meaningful for Z layout
+  }
+
+  // Nested: lay items along X axis (original behavior)
   let xCursor = origin[0];
 
   for (const item of conj.items) {
@@ -235,8 +254,8 @@ function layoutPredicateDef(
   origin: [number, number, number],
   nodes: SceneNode[],
   pipes: PipeInfo[],
-  holderPositions: Map<string, [number, number, number]>,
-  holderNodeIds: Map<string, string>,
+  _holderPositions: Map<string, [number, number, number]>,
+  _holderNodeIds: Map<string, string>,
   parentId?: string,
   constructorNames?: Set<string>,
 ): number {
@@ -244,6 +263,11 @@ function layoutPredicateDef(
   const clauseNodes: SceneNode[][] = [];
   const clausePipes: PipeInfo[][] = [];
   let maxClauseWidth = 0;
+
+  // Each predicate def gets its own scoped variable maps
+  // so variables don't leak between sibling definitions
+  const localHolderPositions = new Map<string, [number, number, number]>();
+  const localHolderNodeIds = new Map<string, string>();
 
   // Layout each clause (disjunction stacked on Y)
   for (let i = 0; i < def.clauses.length; i++) {
@@ -257,7 +281,7 @@ function layoutPredicateDef(
     ];
 
     const width = layoutConjunction(
-      def.clauses[i], innerOrigin, clauseSceneNodes, clauseScenePipes, holderPositions, holderNodeIds, defId, constructorNames,
+      def.clauses[i], innerOrigin, clauseSceneNodes, clauseScenePipes, localHolderPositions, localHolderNodeIds, defId, constructorNames,
     );
     maxClauseWidth = Math.max(maxClauseWidth, width);
     clauseNodes.push(clauseSceneNodes);
@@ -304,9 +328,9 @@ function layoutPredicateDef(
     };
   });
 
-  // Register param names as holder positions (for pipe inference)
+  // Register param names as holder positions (for pipe inference within this def)
   for (const port of ports) {
-    holderPositions.set(port.name, port.worldPos);
+    localHolderPositions.set(port.name, port.worldPos);
   }
 
   nodes.push({

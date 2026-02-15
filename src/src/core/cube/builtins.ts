@@ -101,6 +101,24 @@ export function emitBuiltin(
     case 'not':
       // Not requires suspension semantics — no-op for now
       return true;
+    // Bitwise operations
+    case 'band':
+      return emitBand(builder, argMappings);
+    case 'bor':
+      return emitBor(builder, argMappings);
+    case 'bxor':
+      return emitBxor(builder, argMappings);
+    case 'bnot':
+      return emitBnot(builder, argMappings);
+    case 'shl':
+      return emitShl(builder, argMappings);
+    case 'shr':
+      return emitShr(builder, argMappings);
+    // Port I/O
+    case 'send':
+      return emitSend(builder, argMappings);
+    case 'recv':
+      return emitRecv(builder, argMappings);
     default:
       return false;
   }
@@ -363,4 +381,158 @@ function emitEqual(
   }
 
   return false;
+}
+
+// ---- band{a, b, c}: c = a AND b ----
+
+function emitBand(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
+): boolean {
+  const a = args.get('a');
+  const b = args.get('b');
+  const c = args.get('c');
+  if (!isKnown(a) || !isKnown(b)) return false;
+
+  loadArg(builder, a);
+  loadArg(builder, b);
+  builder.emitOp(OPCODE_MAP.get('and')!);
+  if (c?.mapping) emitStore(builder, c.mapping);
+  return true;
+}
+
+// ---- bor{a, b, c}: c = a OR b ----
+// F18A has no OR instruction. Synthesize via DeMorgan: a|b = ~(~a & ~b)
+
+function emitBor(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
+): boolean {
+  const a = args.get('a');
+  const b = args.get('b');
+  const c = args.get('c');
+  if (!isKnown(a) || !isKnown(b)) return false;
+
+  // ~a
+  loadArg(builder, a);
+  builder.emitOp(OPCODE_MAP.get('-')!);    // NOT a
+  // ~b
+  loadArg(builder, b);
+  builder.emitOp(OPCODE_MAP.get('-')!);    // NOT b
+  // ~a & ~b
+  builder.emitOp(OPCODE_MAP.get('and')!);
+  // ~(~a & ~b) = a | b
+  builder.emitOp(OPCODE_MAP.get('-')!);    // NOT
+  if (c?.mapping) emitStore(builder, c.mapping);
+  return true;
+}
+
+// ---- bxor{a, b, c}: c = a XOR b ----
+
+function emitBxor(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
+): boolean {
+  const a = args.get('a');
+  const b = args.get('b');
+  const c = args.get('c');
+  if (!isKnown(a) || !isKnown(b)) return false;
+
+  loadArg(builder, a);
+  loadArg(builder, b);
+  builder.emitOp(OPCODE_MAP.get('or')!);   // F18A 'or' is actually XOR
+  if (c?.mapping) emitStore(builder, c.mapping);
+  return true;
+}
+
+// ---- bnot{a, b}: b = NOT a ----
+
+function emitBnot(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
+): boolean {
+  const a = args.get('a');
+  const b = args.get('b');
+  if (!isKnown(a)) return false;
+
+  loadArg(builder, a);
+  builder.emitOp(OPCODE_MAP.get('-')!);    // bitwise complement
+  if (b?.mapping) emitStore(builder, b.mapping);
+  return true;
+}
+
+// ---- shl{a, n, c}: c = a << n (n must be literal) ----
+
+function emitShl(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
+): boolean {
+  const a = args.get('a');
+  const n = args.get('n');
+  const c = args.get('c');
+  if (!isKnown(a) || !n || n.literal === undefined) return false;
+
+  loadArg(builder, a);
+  const count = n.literal;
+  for (let i = 0; i < count; i++) {
+    builder.emitOp(OPCODE_MAP.get('2*')!);
+  }
+  if (c?.mapping) emitStore(builder, c.mapping);
+  return true;
+}
+
+// ---- shr{a, n, c}: c = a >> n (n must be literal) ----
+
+function emitShr(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
+): boolean {
+  const a = args.get('a');
+  const n = args.get('n');
+  const c = args.get('c');
+  if (!isKnown(a) || !n || n.literal === undefined) return false;
+
+  loadArg(builder, a);
+  const count = n.literal;
+  for (let i = 0; i < count; i++) {
+    builder.emitOp(OPCODE_MAP.get('2/')!);
+  }
+  if (c?.mapping) emitStore(builder, c.mapping);
+  return true;
+}
+
+// ---- send{port, value}: blocking write to port ----
+// port must be a literal (0x1D5=right, 0x115=down, 0x175=left, 0x145=up)
+
+function emitSend(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
+): boolean {
+  const port = args.get('port');
+  const value = args.get('value');
+  if (!port || port.literal === undefined || !isKnown(value)) return false;
+
+  emitLoadLiteral(builder, port.literal);
+  builder.emitOp(OPCODE_MAP.get('a!')!);     // A = port address
+  loadArg(builder, value);
+  builder.emitOp(OPCODE_MAP.get('!')!);       // blocking write T to [A]
+  return true;
+}
+
+// ---- recv{port, value}: blocking read from port ----
+// port must be a literal
+
+function emitRecv(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
+): boolean {
+  const port = args.get('port');
+  const value = args.get('value');
+  if (!port || port.literal === undefined) return false;
+
+  emitLoadLiteral(builder, port.literal);
+  builder.emitOp(OPCODE_MAP.get('a!')!);     // A = port address
+  builder.emitOp(OPCODE_MAP.get('@')!);       // blocking read from [A] → T
+  if (value?.mapping) emitStore(builder, value.mapping);
+  return true;
 }
