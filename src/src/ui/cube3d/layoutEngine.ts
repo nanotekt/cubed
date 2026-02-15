@@ -152,13 +152,21 @@ export function filterSceneGraph(sg: SceneGraph, focusId: string): SceneGraph {
   return { nodes: filteredNodes, pipes: filteredPipes };
 }
 
+// ---- Layout extent (returned by all layout functions) ----
+
+interface LayoutExtent {
+  width: number;  // X extent
+  depth: number;  // Z extent
+}
+
 // ---- Layout constants ----
 
 const ITEM_SPACING_X = 2.5;
-const ITEM_SPACING_Z = 3.5; // spacing between top-level items along depth
-const ZIGZAG_Z = 1.2;       // Z offset for odd-indexed nested conjunction items
+const ITEM_SPACING_Z = 1.0;  // gap between items in Z within a nested conjunction
+const TOP_LEVEL_SPACING_Z = 1.5; // extra gap between top-level items
 const CLAUSE_SPACING_Y = 2.0;
 const DEF_PADDING = 0.5;
+const DEF_DEPTH_PAD = 0.5; // Z padding around content inside containers
 const APP_SIZE = 1.0;
 const HOLDER_SIZE = 0.5;
 const LITERAL_SIZE = 0.6;
@@ -190,7 +198,8 @@ export function layoutAST(program: CubeProgram): SceneGraph {
 
 // ---- Conjunction layout ----
 // Top-level: items along Z (depth), each definition gets its own row.
-// Nested (inside a predicate clause): items along X (horizontal AND).
+// Nested (inside a predicate clause): items along X (horizontal AND),
+// with each item offset in Z by the cumulative depth of prior items.
 
 function layoutConjunction(
   conj: Conjunction,
@@ -202,29 +211,36 @@ function layoutConjunction(
   parentId?: string,
   constructorNames?: Set<string>,
   topLevel: boolean = false,
-): number {
+): LayoutExtent {
   if (topLevel) {
     // Top-level: lay items out along Z axis to avoid overlap
     let zCursor = origin[2];
     for (const item of conj.items) {
-      layoutItem(item, [origin[0], origin[1], zCursor], nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
-      zCursor += ITEM_SPACING_Z;
+      const ext = layoutItem(item, [origin[0], origin[1], zCursor], nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
+      zCursor += ext.depth + TOP_LEVEL_SPACING_Z;
     }
-    return 0; // width not meaningful for Z layout
+    return { width: 0, depth: zCursor - origin[2] };
   }
 
-  // Nested: lay items along X axis, alternating Z to prevent
-  // pipes from passing through intermediate objects.
+  // Nested: lay items along X axis. Each item is offset in Z by the
+  // cumulative depth of the preceding items so pipes route around objects.
   let xCursor = origin[0];
+  let totalDepth = 0;
 
   for (let i = 0; i < conj.items.length; i++) {
     const item = conj.items[i];
-    const zOff = (i % 2 === 1) ? ZIGZAG_Z : 0;
-    const width = layoutItem(item, [xCursor, origin[1], origin[2] + zOff], nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
-    xCursor += width + ITEM_SPACING_X;
+    // Alternate Z: even items at current Z, odd items pushed forward
+    const zOff = (i % 2 === 1) ? ITEM_SPACING_Z : 0;
+    const ext = layoutItem(item, [xCursor, origin[1], origin[2] + zOff], nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
+    xCursor += ext.width + ITEM_SPACING_X;
+    // Track the maximum Z extent (item depth + its Z offset)
+    totalDepth = Math.max(totalDepth, zOff + ext.depth);
   }
 
-  return xCursor - origin[0] - ITEM_SPACING_X;
+  return {
+    width: xCursor - origin[0] - ITEM_SPACING_X,
+    depth: totalDepth,
+  };
 }
 
 // ---- Single item dispatch ----
@@ -238,7 +254,7 @@ function layoutItem(
   holderNodeIds: Map<string, string>,
   parentId?: string,
   constructorNames?: Set<string>,
-): number {
+): LayoutExtent {
   switch (item.kind) {
     case 'predicate_def':
       return layoutPredicateDef(item, pos, nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
@@ -262,11 +278,12 @@ function layoutPredicateDef(
   _holderNodeIds: Map<string, string>,
   parentId?: string,
   constructorNames?: Set<string>,
-): number {
+): LayoutExtent {
   const defId = nextId('def');
   const clauseNodes: SceneNode[][] = [];
   const clausePipes: PipeInfo[][] = [];
   let maxClauseWidth = 0;
+  let maxClauseDepth = 0;
 
   // Each predicate def gets its own scoped variable maps
   // so variables don't leak between sibling definitions
@@ -284,25 +301,27 @@ function layoutPredicateDef(
       origin[2],
     ];
 
-    const width = layoutConjunction(
+    const ext = layoutConjunction(
       def.clauses[i], innerOrigin, clauseSceneNodes, clauseScenePipes, localHolderPositions, localHolderNodeIds, defId, constructorNames,
     );
-    maxClauseWidth = Math.max(maxClauseWidth, width);
+    maxClauseWidth = Math.max(maxClauseWidth, ext.width);
+    maxClauseDepth = Math.max(maxClauseDepth, ext.depth);
     clauseNodes.push(clauseSceneNodes);
     clausePipes.push(clauseScenePipes);
 
-    // Plane box for this clause
+    // Plane box for this clause (Z sized to content depth)
     const planeId = nextId('plane');
+    const planeDepth = ext.depth + DEF_DEPTH_PAD;
     nodes.push({
       id: planeId,
       type: 'plane',
       label: `clause ${i + 1}`,
       position: [
-        innerOrigin[0] + width / 2 - APP_SIZE / 2,
+        innerOrigin[0] + ext.width / 2 - APP_SIZE / 2,
         clauseY,
-        origin[2] + ZIGZAG_Z / 2,
+        origin[2] + planeDepth / 2,
       ],
-      size: [width + DEF_PADDING, 1.2, ZIGZAG_Z + 1.2],
+      size: [ext.width + DEF_PADDING, 1.2, planeDepth + APP_SIZE],
       color: COLORS.plane,
       transparent: true,
       opacity: 0.15,
@@ -314,6 +333,7 @@ function layoutPredicateDef(
   // Outer definition box
   const totalWidth = maxClauseWidth + DEF_PADDING * 2;
   const totalHeight = def.clauses.length * CLAUSE_SPACING_Y + DEF_PADDING;
+  const contentDepth = maxClauseDepth + DEF_DEPTH_PAD * 2;
 
   // Build ports from params
   const ports: PortInfo[] = def.params.map((p, i) => {
@@ -344,9 +364,9 @@ function layoutPredicateDef(
     position: [
       origin[0] + totalWidth / 2 - APP_SIZE / 2,
       origin[1] - totalHeight / 2 + 0.5,
-      origin[2] + ZIGZAG_Z / 2,
+      origin[2] + contentDepth / 2,
     ],
-    size: [totalWidth, totalHeight, ZIGZAG_Z + 1.5],
+    size: [totalWidth, totalHeight, contentDepth + APP_SIZE],
     color: COLORS.definition,
     transparent: true,
     opacity: 0.2,
@@ -358,7 +378,7 @@ function layoutPredicateDef(
   for (const cn of clauseNodes) nodes.push(...cn);
   for (const cp of clausePipes) pipes.push(...cp);
 
-  return totalWidth;
+  return { width: totalWidth, depth: contentDepth + APP_SIZE };
 }
 
 // ---- Type Definition ----
@@ -373,7 +393,7 @@ function layoutTypeDef(
   origin: [number, number, number],
   nodes: SceneNode[],
   parentId?: string,
-): number {
+): LayoutExtent {
   const defId = nextId('typedef');
   let maxVariantWidth = 0;
 
@@ -443,6 +463,7 @@ function layoutTypeDef(
   const totalWidth = maxVariantWidth + DEF_PADDING * 2;
   const totalHeight = Math.max(typeDef.variants.length * VARIANT_SPACING_Y, 1.0);
 
+  const typeDefDepth = 1.2;
   nodes.push({
     id: defId,
     type: 'type_definition',
@@ -452,7 +473,7 @@ function layoutTypeDef(
       origin[1] - totalHeight / 2 + VARIANT_SPACING_Y / 2,
       origin[2],
     ],
-    size: [totalWidth, totalHeight, 1.2],
+    size: [totalWidth, totalHeight, typeDefDepth],
     color: COLORS.type_def,
     transparent: true,
     opacity: 0.15,
@@ -460,7 +481,7 @@ function layoutTypeDef(
     ports: [],
   });
 
-  return totalWidth;
+  return { width: totalWidth, depth: typeDefDepth };
 }
 
 // ---- Application ----
@@ -474,8 +495,8 @@ function layoutApplication(
   holderNodeIds: Map<string, string>,
   parentId?: string,
   constructorNames?: Set<string>,
-): number {
-  if (app.functor === '__node') return 0; // node directive is invisible
+): LayoutExtent {
+  if (app.functor === '__node') return { width: 0, depth: 0 }; // node directive is invisible
 
   const isConstructor = constructorNames?.has(app.functor) ?? false;
   const appId = nextId(isConstructor ? 'ctor' : 'app');
@@ -524,7 +545,7 @@ function layoutApplication(
     layoutTermForPort(arg.value, port, appId, pos, nodes, pipes, holderPositions, holderNodeIds, appId, constructorNames);
   }
 
-  return APP_SIZE;
+  return { width: APP_SIZE, depth: APP_SIZE };
 }
 
 // ---- Unification ----
@@ -538,7 +559,7 @@ function layoutUnification(
   holderNodeIds: Map<string, string>,
   parentId?: string,
   constructorNames?: Set<string>,
-): number {
+): LayoutExtent {
   // Left holder for the variable
   const holderId = nextId('holder');
   const holderPos: [number, number, number] = [pos[0], pos[1], pos[2]];
@@ -573,7 +594,7 @@ function layoutUnification(
     toNodeId: termNodeId ?? undefined,
   });
 
-  return 1.5 + HOLDER_SIZE;
+  return { width: 1.5 + HOLDER_SIZE, depth: HOLDER_SIZE };
 }
 
 // ---- Term layout (for standalone terms) ----
