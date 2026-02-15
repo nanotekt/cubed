@@ -5,7 +5,7 @@ import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import type { CubeProgram } from '../../core/cube/ast';
 import { layoutAST, filterSceneGraph } from './layoutEngine';
-import type { SceneNode } from './layoutEngine';
+import type { SceneNode, PipeInfo } from './layoutEngine';
 import { CubeScene } from './CubeScene';
 
 interface CubeRendererProps {
@@ -17,6 +17,7 @@ export function CubeRenderer({ ast }: CubeRendererProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [hoveredPipeId, setHoveredPipeId] = useState<string | null>(null);
   const [focusStack, setFocusStack] = useState<string[]>([]);
 
   // Reset focus when AST changes (new compilation)
@@ -49,6 +50,19 @@ export function CubeRenderer({ ast }: CubeRendererProps) {
   const hoveredNode: SceneNode | undefined = hoveredId
     ? sceneGraph.nodes.find(n => n.id === hoveredId)
     : undefined;
+
+  const hoveredPipe: PipeInfo | undefined = hoveredPipeId
+    ? sceneGraph.pipes.find(p => p.id === hoveredPipeId)
+    : undefined;
+
+  // Node IDs highlighted via pipe hover (the two endpoints)
+  const pipeHighlightIds = useMemo(() => {
+    if (!hoveredPipe) return new Set<string>();
+    const ids = new Set<string>();
+    if (hoveredPipe.fromNodeId) ids.add(hoveredPipe.fromNodeId);
+    if (hoveredPipe.toNodeId) ids.add(hoveredPipe.toNodeId);
+    return ids;
+  }, [hoveredPipe]);
 
   // Incremented to trigger camera reset on focus change
   const [cameraResetKey, setCameraResetKey] = useState(0);
@@ -116,6 +130,9 @@ export function CubeRenderer({ ast }: CubeRendererProps) {
           onClick={setSelectedId}
           onDoubleClick={handleDoubleClick}
           resetKey={cameraResetKey}
+          hoveredPipeId={hoveredPipeId}
+          onPipeHover={setHoveredPipeId}
+          pipeHighlightIds={pipeHighlightIds}
         />
       </Canvas>
 
@@ -168,7 +185,7 @@ export function CubeRenderer({ ast }: CubeRendererProps) {
       </IconButton>
 
       {/* Tooltip overlay */}
-      {hoveredNode && (
+      {(hoveredNode || hoveredPipe) && (
         <Box sx={{
           position: 'absolute',
           top: 8,
@@ -182,17 +199,35 @@ export function CubeRenderer({ ast }: CubeRendererProps) {
           pointerEvents: 'none',
           border: '1px solid #444',
         }}>
-          <Typography variant="caption" sx={{ color: '#999', fontSize: '9px' }}>
-            {hoveredNode.type}
-          </Typography>
-          <Typography variant="body2" sx={{ fontSize: '12px', fontWeight: 'bold' }}>
-            {hoveredNode.label}
-          </Typography>
-          {hoveredNode.ports.length > 0 && (
-            <Typography variant="caption" sx={{ color: '#888', fontSize: '9px' }}>
-              ports: {hoveredNode.ports.map(p => p.name).join(', ')}
-            </Typography>
+          {hoveredNode && (
+            <>
+              <Typography variant="caption" sx={{ color: '#999', fontSize: '9px' }}>
+                {hoveredNode.type}
+              </Typography>
+              <Typography variant="body2" sx={{ fontSize: '12px', fontWeight: 'bold' }}>
+                {hoveredNode.label}
+              </Typography>
+              {hoveredNode.ports.length > 0 && (
+                <Typography variant="caption" sx={{ color: '#888', fontSize: '9px' }}>
+                  ports: {hoveredNode.ports.map(p => p.name).join(', ')}
+                </Typography>
+              )}
+            </>
           )}
+          {hoveredPipe && !hoveredNode && (() => {
+            const fromNode = hoveredPipe.fromNodeId ? sceneGraph.nodes.find(n => n.id === hoveredPipe.fromNodeId) : undefined;
+            const toNode = hoveredPipe.toNodeId ? sceneGraph.nodes.find(n => n.id === hoveredPipe.toNodeId) : undefined;
+            return (
+              <>
+                <Typography variant="caption" sx={{ color: '#999', fontSize: '9px' }}>
+                  pipe
+                </Typography>
+                <Typography variant="body2" sx={{ fontSize: '12px', fontWeight: 'bold' }}>
+                  {fromNode?.label ?? '?'} → {toNode?.label ?? '?'}
+                </Typography>
+              </>
+            );
+          })()}
         </Box>
       )}
     </Box>

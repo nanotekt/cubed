@@ -60,6 +60,9 @@ interface CubeSceneProps {
   onClick: (id: string) => void;
   onDoubleClick: (id: string) => void;
   resetKey: number;
+  hoveredPipeId: string | null;
+  onPipeHover: (id: string | null) => void;
+  pipeHighlightIds: Set<string>;
 }
 
 /** Build a map from parentId → direct children */
@@ -77,10 +80,14 @@ function buildChildrenMap(nodes: SceneNode[]): Map<string | undefined, SceneNode
   return map;
 }
 
-export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick, onDoubleClick, resetKey }: CubeSceneProps) {
+export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick, onDoubleClick, resetKey, hoveredPipeId, onPipeHover, pipeHighlightIds }: CubeSceneProps) {
   const activeId = hoveredId ?? selectedId;
 
   const childrenMap = useMemo(() => buildChildrenMap(sceneGraph.nodes), [sceneGraph.nodes]);
+
+  function isNodeHighlighted(id: string): boolean {
+    return id === activeId || pipeHighlightIds.has(id);
+  }
 
   function renderNode(node: SceneNode): ReactNode {
     const children = childrenMap.get(node.id);
@@ -92,7 +99,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick,
           <DefinitionCube
             key={node.id}
             node={node}
-            selected={node.id === activeId}
+            selected={isNodeHighlighted(node.id)}
             onHover={onHover}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
@@ -105,7 +112,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick,
           <ApplicationCube
             key={node.id}
             node={node}
-            selected={node.id === activeId}
+            selected={isNodeHighlighted(node.id)}
             onHover={onHover}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
@@ -118,7 +125,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick,
           <HolderCube
             key={node.id}
             node={node}
-            selected={node.id === activeId}
+            selected={isNodeHighlighted(node.id)}
             onHover={onHover}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
@@ -129,7 +136,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick,
           <LiteralCube
             key={node.id}
             node={node}
-            selected={node.id === activeId}
+            selected={isNodeHighlighted(node.id)}
             onHover={onHover}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
@@ -146,7 +153,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick,
           <ConstructorCube
             key={node.id}
             node={node}
-            selected={node.id === activeId}
+            selected={isNodeHighlighted(node.id)}
             onHover={onHover}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
@@ -159,7 +166,7 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick,
           <TypeDefCube
             key={node.id}
             node={node}
-            selected={node.id === activeId}
+            selected={isNodeHighlighted(node.id)}
             onHover={onHover}
             onClick={onClick}
             onDoubleClick={onDoubleClick}
@@ -209,7 +216,12 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick,
 
       {/* Pipes */}
       {sceneGraph.pipes.map(pipe => (
-        <Pipe key={pipe.id} pipe={pipe} />
+        <Pipe
+          key={pipe.id}
+          pipe={pipe}
+          highlighted={pipe.id === hoveredPipeId}
+          onHover={onPipeHover}
+        />
       ))}
     </>
   );

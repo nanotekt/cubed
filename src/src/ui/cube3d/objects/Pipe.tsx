@@ -4,9 +4,11 @@ import type { PipeInfo } from '../layoutEngine';
 
 interface PipeProps {
   pipe: PipeInfo;
+  highlighted: boolean;
+  onHover: (id: string | null) => void;
 }
 
-export function Pipe({ pipe }: PipeProps) {
+export function Pipe({ pipe, highlighted, onHover }: PipeProps) {
   const geometry = useMemo(() => {
     const from = new THREE.Vector3(...pipe.from);
     const to = new THREE.Vector3(...pipe.to);
@@ -15,18 +17,25 @@ export function Pipe({ pipe }: PipeProps) {
     mid.y += 0.3;
 
     const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
-    return new THREE.TubeGeometry(curve, 16, 0.04, 8, false);
-  }, [pipe.from, pipe.to]);
+    return new THREE.TubeGeometry(curve, 16, highlighted ? 0.07 : 0.04, 8, false);
+  }, [pipe.from, pipe.to, highlighted]);
+
+  const color = highlighted ? '#ffffff' : pipe.color;
 
   return (
-    <mesh geometry={geometry} renderOrder={2}>
+    <mesh
+      geometry={geometry}
+      renderOrder={2}
+      onPointerOver={(e) => { e.stopPropagation(); onHover(pipe.id); }}
+      onPointerOut={() => onHover(null)}
+    >
       <meshStandardMaterial
-        color={pipe.color}
+        color={color}
         transparent
-        opacity={0.7}
+        opacity={highlighted ? 1 : 0.7}
         depthWrite={false}
-        emissive={pipe.color}
-        emissiveIntensity={0.3}
+        emissive={color}
+        emissiveIntensity={highlighted ? 0.8 : 0.3}
       />
     </mesh>
   );
