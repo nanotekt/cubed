@@ -156,6 +156,7 @@ export function filterSceneGraph(sg: SceneGraph, focusId: string): SceneGraph {
 
 const ITEM_SPACING_X = 2.5;
 const ITEM_SPACING_Z = 3.5; // spacing between top-level items along depth
+const ZIGZAG_Z = 1.2;       // Z offset for odd-indexed nested conjunction items
 const CLAUSE_SPACING_Y = 2.0;
 const DEF_PADDING = 0.5;
 const APP_SIZE = 1.0;
@@ -212,11 +213,14 @@ function layoutConjunction(
     return 0; // width not meaningful for Z layout
   }
 
-  // Nested: lay items along X axis (original behavior)
+  // Nested: lay items along X axis, alternating Z to prevent
+  // pipes from passing through intermediate objects.
   let xCursor = origin[0];
 
-  for (const item of conj.items) {
-    const width = layoutItem(item, [xCursor, origin[1], origin[2]], nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
+  for (let i = 0; i < conj.items.length; i++) {
+    const item = conj.items[i];
+    const zOff = (i % 2 === 1) ? ZIGZAG_Z : 0;
+    const width = layoutItem(item, [xCursor, origin[1], origin[2] + zOff], nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
     xCursor += width + ITEM_SPACING_X;
   }
 
@@ -296,9 +300,9 @@ function layoutPredicateDef(
       position: [
         innerOrigin[0] + width / 2 - APP_SIZE / 2,
         clauseY,
-        origin[2],
+        origin[2] + ZIGZAG_Z / 2,
       ],
-      size: [width + DEF_PADDING, 1.2, 1.2],
+      size: [width + DEF_PADDING, 1.2, ZIGZAG_Z + 1.2],
       color: COLORS.plane,
       transparent: true,
       opacity: 0.15,
@@ -340,9 +344,9 @@ function layoutPredicateDef(
     position: [
       origin[0] + totalWidth / 2 - APP_SIZE / 2,
       origin[1] - totalHeight / 2 + 0.5,
-      origin[2],
+      origin[2] + ZIGZAG_Z / 2,
     ],
-    size: [totalWidth, totalHeight, 1.5],
+    size: [totalWidth, totalHeight, ZIGZAG_Z + 1.5],
     color: COLORS.definition,
     transparent: true,
     opacity: 0.2,
