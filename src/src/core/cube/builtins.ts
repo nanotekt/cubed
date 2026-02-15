@@ -2,31 +2,40 @@
  * Built-in predicate code generation for CUBE.
  * Each builtin emits F18A code for its operation.
  *
- * Phase 1: Forward-mode only (all inputs → compute output).
- * Multidirectional (any subset known → compute others) deferred.
+ * Supports multidirectional modes: given any subset of known arguments,
+ * computes the unknown ones. For predicates like `greater` and `equal`,
+ * supports conditional branching via fail labels.
  */
 import { OPCODE_MAP } from '../constants';
 import { CodeBuilder } from '../codegen/builder';
 import type { VarMapping } from './varmapper';
 
+// ---- Arg info type ----
+
+export interface ArgInfo {
+  mapping?: VarMapping;
+  literal?: number;
+}
+
+/** Whether an argument is "known" (has a literal or a RAM mapping) */
+function isKnown(arg: ArgInfo | undefined): arg is ArgInfo {
+  return arg !== undefined && (arg.literal !== undefined || arg.mapping !== undefined);
+}
+
+// ---- Load / Store helpers ----
+
 /** Load a variable's value onto the stack (T register) */
 export function emitLoad(builder: CodeBuilder, mapping: VarMapping): void {
   if (mapping.ramAddr !== undefined) {
-    // @p a! [addr] @
     builder.emitLiteral(mapping.ramAddr);
     builder.emitOp(OPCODE_MAP.get('a!')!);
     builder.emitOp(OPCODE_MAP.get('@')!);
   }
 }
 
-/** Store T register value into a variable's location */
+/** Store T register value into a variable's location (consumes T) */
 export function emitStore(builder: CodeBuilder, mapping: VarMapping): void {
   if (mapping.ramAddr !== undefined) {
-    // @p a! [addr] ! (but we need to preserve T)
-    // Actually: dup @p a! [addr] !
-    // Wait, we want to store T without consuming it? For now consume it.
-    // push @p a! [addr] pop ! (save T, set A, restore T, store)
-    // Simpler: just set A to addr and store
     builder.emitOp(OPCODE_MAP.get('push')!);  // save T to R
     builder.emitLiteral(mapping.ramAddr);
     builder.emitOp(OPCODE_MAP.get('a!')!);
@@ -40,41 +49,8 @@ export function emitLoadLiteral(builder: CodeBuilder, value: number): void {
   builder.emitLiteral(value);
 }
 
-/**
- * Emit code for builtin predicates.
- * Returns true if handled, false if unknown.
- */
-export function emitBuiltin(
-  builder: CodeBuilder,
-  name: string,
-  argMappings: Map<string, { mapping?: VarMapping; literal?: number }>,
-): boolean {
-  switch (name) {
-    case 'plus':
-      return emitArithmetic(builder, argMappings, 'add');
-
-    case 'minus':
-      return emitSubtract(builder, argMappings);
-
-    case 'times':
-      return emitMultiply(builder, argMappings);
-
-    case 'greater':
-      return emitGreater(builder, argMappings);
-
-    case 'equal':
-      return emitEqual(builder, argMappings);
-
-    case 'not':
-      // Phase 1: not is a no-op (negation requires suspension semantics)
-      return true;
-
-    default:
-      return false;
-  }
-}
-
-function loadArg(builder: CodeBuilder, arg: { mapping?: VarMapping; literal?: number }): void {
+/** Load an argument (literal or variable) onto T */
+function loadArg(builder: CodeBuilder, arg: ArgInfo): void {
   if (arg.literal !== undefined) {
     emitLoadLiteral(builder, arg.literal);
   } else if (arg.mapping) {
@@ -82,130 +58,309 @@ function loadArg(builder: CodeBuilder, arg: { mapping?: VarMapping; literal?: nu
   }
 }
 
-function emitArithmetic(
-  builder: CodeBuilder,
-  args: Map<string, { mapping?: VarMapping; literal?: number }>,
-  _opName: string,
-): boolean {
-  const a = args.get('a');
-  const b = args.get('b');
-  const c = args.get('c');
-  if (!a || !b) return false;
-
-  // Load a, load b, op, store c
-  loadArg(builder, a);
-  loadArg(builder, b);
-  builder.emitOp(OPCODE_MAP.get('+')!); // add
-
-  if (c?.mapping) {
-    emitStore(builder, c.mapping);
-  }
-
-  return true;
-}
-
-function emitSubtract(
-  builder: CodeBuilder,
-  args: Map<string, { mapping?: VarMapping; literal?: number }>,
-): boolean {
-  const a = args.get('a');
-  const b = args.get('b');
-  const c = args.get('c');
-  if (!a || !b) return false;
-
-  // a - b: load b, negate (com), load 1, add (to get -b), load a, add
-  // F18A negate: - (bitwise complement) then +1
-  // So: load a, load b, - (com b), 1 . + (add 1 to get -b), + (add a)
-  loadArg(builder, b);
-  builder.emitOp(OPCODE_MAP.get('-')!);  // complement
+/** Emit: T = -T (two's complement negate) */
+function emitNegate(builder: CodeBuilder): void {
+  builder.emitOp(OPCODE_MAP.get('-')!);   // bitwise complement
   builder.emitLiteral(1);
-  builder.emitOp(OPCODE_MAP.get('.')!);   // nop
-  builder.emitOp(OPCODE_MAP.get('+')!);   // +1 → now T = -b
-  loadArg(builder, a);
-  builder.emitOp(OPCODE_MAP.get('+')!);   // T = a + (-b) = a - b
-
-  if (c?.mapping) {
-    emitStore(builder, c.mapping);
-  }
-  return true;
+  builder.emitOp(OPCODE_MAP.get('.')!);    // nop (required before + after literal)
+  builder.emitOp(OPCODE_MAP.get('+')!);    // +1
 }
 
-function emitMultiply(
+// ---- Builtin context (for ROM access, fail labels) ----
+
+export interface BuiltinContext {
+  /** Label to jump to on failure (for greater, equal check mode) */
+  failLabel?: string;
+  /** ROM divmod address, if available on the target node */
+  romDivmodAddr?: number;
+}
+
+// ---- Main entry point ----
+
+/**
+ * Emit code for builtin predicates.
+ * Returns true if handled, false if unknown.
+ */
+export function emitBuiltin(
   builder: CodeBuilder,
-  args: Map<string, { mapping?: VarMapping; literal?: number }>,
+  name: string,
+  argMappings: Map<string, ArgInfo>,
+  ctx: BuiltinContext = {},
+): boolean {
+  switch (name) {
+    case 'plus':
+      return emitPlus(builder, argMappings);
+    case 'minus':
+      return emitMinus(builder, argMappings);
+    case 'times':
+      return emitTimes(builder, argMappings, ctx);
+    case 'greater':
+      return emitGreater(builder, argMappings, ctx);
+    case 'equal':
+      return emitEqual(builder, argMappings, ctx);
+    case 'not':
+      // Not requires suspension semantics — no-op for now
+      return true;
+    default:
+      return false;
+  }
+}
+
+// ---- plus{a, b, c}: a + b = c ----
+
+function emitPlus(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
 ): boolean {
   const a = args.get('a');
   const b = args.get('b');
   const c = args.get('c');
-  if (!a || !b) return false;
 
+  if (isKnown(a) && isKnown(b)) {
+    // Forward: c = a + b
+    loadArg(builder, a);
+    loadArg(builder, b);
+    builder.emitOp(OPCODE_MAP.get('+')!);
+    if (c?.mapping) emitStore(builder, c.mapping);
+    return true;
+  }
+
+  if (isKnown(a) && isKnown(c)) {
+    // Reverse: b = c - a
+    loadArg(builder, a);
+    emitNegate(builder);      // T = -a
+    loadArg(builder, c);
+    builder.emitOp(OPCODE_MAP.get('+')!);  // T = c + (-a) = c - a
+    if (b?.mapping) emitStore(builder, b.mapping);
+    return true;
+  }
+
+  if (isKnown(b) && isKnown(c)) {
+    // Reverse: a = c - b
+    loadArg(builder, b);
+    emitNegate(builder);      // T = -b
+    loadArg(builder, c);
+    builder.emitOp(OPCODE_MAP.get('+')!);  // T = c + (-b) = c - b
+    if (a?.mapping) emitStore(builder, a.mapping);
+    return true;
+  }
+
+  return false; // Not enough known args
+}
+
+// ---- minus{a, b, c}: a - b = c ----
+
+function emitMinus(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
+): boolean {
+  const a = args.get('a');
+  const b = args.get('b');
+  const c = args.get('c');
+
+  if (isKnown(a) && isKnown(b)) {
+    // Forward: c = a - b
+    loadArg(builder, b);
+    emitNegate(builder);      // T = -b
+    loadArg(builder, a);
+    builder.emitOp(OPCODE_MAP.get('+')!);  // T = a + (-b) = a - b
+    if (c?.mapping) emitStore(builder, c.mapping);
+    return true;
+  }
+
+  if (isKnown(a) && isKnown(c)) {
+    // Reverse: b = a - c
+    loadArg(builder, c);
+    emitNegate(builder);      // T = -c
+    loadArg(builder, a);
+    builder.emitOp(OPCODE_MAP.get('+')!);  // T = a + (-c) = a - c
+    if (b?.mapping) emitStore(builder, b.mapping);
+    return true;
+  }
+
+  if (isKnown(b) && isKnown(c)) {
+    // Reverse: a = b + c
+    loadArg(builder, b);
+    loadArg(builder, c);
+    builder.emitOp(OPCODE_MAP.get('+')!);  // T = b + c
+    if (a?.mapping) emitStore(builder, a.mapping);
+    return true;
+  }
+
+  return false;
+}
+
+// ---- times{a, b, c}: a * b = c ----
+
+function emitTimes(
+  builder: CodeBuilder,
+  args: Map<string, ArgInfo>,
+  ctx: BuiltinContext,
+): boolean {
+  const a = args.get('a');
+  const b = args.get('b');
+  const c = args.get('c');
+
+  if (isKnown(a) && isKnown(b)) {
+    // Forward: c = a * b
+    return emitMultiplyForward(builder, a, b, c);
+  }
+
+  if (isKnown(a) && isKnown(c) && ctx.romDivmodAddr !== undefined) {
+    // Reverse: b = c / a (using ROM divmod)
+    emitDivide(builder, c, a, ctx.romDivmodAddr);
+    if (b?.mapping) emitStore(builder, b.mapping);
+    return true;
+  }
+
+  if (isKnown(b) && isKnown(c) && ctx.romDivmodAddr !== undefined) {
+    // Reverse: a = c / b (using ROM divmod)
+    emitDivide(builder, c, b, ctx.romDivmodAddr);
+    if (a?.mapping) emitStore(builder, a.mapping);
+    return true;
+  }
+
+  return false;
+}
+
+function emitMultiplyForward(
+  builder: CodeBuilder,
+  a: ArgInfo,
+  b: ArgInfo,
+  c: ArgInfo | undefined,
+): boolean {
   // F18A multiply using +* (multiply step):
-  // Setup: A = multiplicand, S = 0 (accumulator), T = multiplier
-  // After 17 iterations of +*: S:T = 36-bit product (S=high, T=low)
-  //
-  // Stack setup: load 0 first (becomes S), then load b (becomes T)
+  // Setup: A = multiplicand, S = 0, T = multiplier
+  // After 17 iterations: S:T = 36-bit product (T = low 18 bits)
   loadArg(builder, a);
-  builder.emitOp(OPCODE_MAP.get('a!')!);  // A = a (multiplicand)
-  builder.emitLiteral(0);                  // T = 0 (will become S=accumulator)
-  loadArg(builder, b);                     // T = b (multiplier), S = 0
+  builder.emitOp(OPCODE_MAP.get('a!')!);  // A = a
+  builder.emitLiteral(0);                  // T = 0 → S
+  loadArg(builder, b);                     // T = b, S = 0
 
-  // 17 iterations: push 17, loop +* next
   builder.emitLiteral(17);
   builder.emitOp(OPCODE_MAP.get('push')!);  // R = 17
   builder.flush();
   const loopAddr = builder.getLocationCounter();
   builder.emitOp(OPCODE_MAP.get('+*')!);
   builder.emitJump(OPCODE_MAP.get('next')!, loopAddr);
-  // After loop: T = low 18 bits of product (what we want)
 
-  if (c?.mapping) {
-    emitStore(builder, c.mapping);
-  }
+  if (c?.mapping) emitStore(builder, c.mapping);
   return true;
 }
+
+function emitDivide(
+  builder: CodeBuilder,
+  dividend: ArgInfo,
+  divisor: ArgInfo,
+  divmodAddr: number,
+): void {
+  // ROM divmod convention: T = divisor, S = dividend
+  // Returns: T = quotient, S = remainder
+  loadArg(builder, dividend);
+  loadArg(builder, divisor);
+  builder.emitJump(OPCODE_MAP.get('call')!, divmodAddr);
+  // T now holds quotient
+}
+
+// ---- greater{a, b}: succeeds when a > b ----
 
 function emitGreater(
   builder: CodeBuilder,
-  args: Map<string, { mapping?: VarMapping; literal?: number }>,
+  args: Map<string, ArgInfo>,
+  ctx: BuiltinContext,
 ): boolean {
   const a = args.get('a');
   const b = args.get('b');
-  if (!a || !b) return false;
+  if (!isKnown(a) || !isKnown(b)) return false;
 
-  // a > b: compute a - b, check sign bit
-  // If result is positive (bit 17 = 0), a > b
-  // -if jumps if T bit 17 is 1 (negative)
-  // For now: just compute a - b and leave on stack
+  // Compute a - b - 1 to test a > b
+  // If (a - b - 1) >= 0, then a - b >= 1, then a > b: SUCCESS
+  // If (a - b - 1) < 0, then a <= b: FAIL
+  //
+  // -if jumps when T bit 17 = 0 (T >= 0 in signed) → jumps on SUCCESS
+  // So: -if <skip_fail>, then fall through to jump <failLabel>
+
+  // Step 1: compute a - b
   loadArg(builder, b);
-  builder.emitOp(OPCODE_MAP.get('-')!);   // complement b
-  builder.emitLiteral(1);
-  builder.emitOp(OPCODE_MAP.get('.')!);
-  builder.emitOp(OPCODE_MAP.get('+')!);   // -b
+  emitNegate(builder);                        // T = -b
   loadArg(builder, a);
-  builder.emitOp(OPCODE_MAP.get('+')!);   // a - b
+  builder.emitOp(OPCODE_MAP.get('+')!);       // T = a - b
+
+  // Step 2: subtract 1 → T = a - b - 1
+  // -1 = complement of 0 (0x3FFFF in 18-bit)
+  builder.emitLiteral(0);
+  builder.emitOp(OPCODE_MAP.get('-')!);       // complement 0 → 0x3FFFF = -1
+  builder.emitOp(OPCODE_MAP.get('.')!);       // nop
+  builder.emitOp(OPCODE_MAP.get('+')!);       // T = (a - b) + (-1) = a - b - 1
+
+  if (ctx.failLabel) {
+    // -if jumps when T >= 0 → success, skip over fail jump
+    builder.flush();
+    const continueAddr = builder.getLocationCounter() + 2; // skip the fail jump
+    builder.emitJump(OPCODE_MAP.get('-if')!, continueAddr);
+    // Fall through = failure: jump to fail label
+    builder.addForwardRef(ctx.failLabel);
+    builder.emitJump(OPCODE_MAP.get('jump')!, 0); // patched by forward ref
+    // continueAddr lands here: success path continues
+  }
+  // If no failLabel, just leave the test result on stack
 
   return true;
 }
 
+// ---- equal{a, b}: unification / equality check ----
+
 function emitEqual(
   builder: CodeBuilder,
-  args: Map<string, { mapping?: VarMapping; literal?: number }>,
+  args: Map<string, ArgInfo>,
+  ctx: BuiltinContext,
 ): boolean {
   const a = args.get('a');
   const b = args.get('b');
   if (!a || !b) return false;
 
-  // Unification: copy a to b or b to a (whichever has a storage location)
-  if (a.literal !== undefined && b.mapping) {
-    emitLoadLiteral(builder, a.literal);
+  const aKnown = isKnown(a);
+  const bKnown = isKnown(b);
+
+  if (aKnown && !bKnown && b.mapping) {
+    // Assignment: b = a
+    loadArg(builder, a);
     emitStore(builder, b.mapping);
-  } else if (b.literal !== undefined && a.mapping) {
-    emitLoadLiteral(builder, b.literal);
-    emitStore(builder, a.mapping);
-  } else if (a.mapping && b.mapping) {
-    emitLoad(builder, a.mapping);
-    emitStore(builder, b.mapping);
+    return true;
   }
 
-  return true;
+  if (bKnown && !aKnown && a.mapping) {
+    // Assignment: a = b
+    loadArg(builder, b);
+    emitStore(builder, a.mapping);
+    return true;
+  }
+
+  if (aKnown && bKnown) {
+    // Check mode: verify a == b, fail if not
+    loadArg(builder, a);
+    loadArg(builder, b);
+    builder.emitOp(OPCODE_MAP.get('or')!);  // XOR: T = a ^ b (0 if equal)
+
+    if (ctx.failLabel) {
+      // if jumps when T = 0 (equal) → success, skip fail
+      builder.flush();
+      const continueAddr = builder.getLocationCounter() + 2;
+      builder.emitJump(OPCODE_MAP.get('if')!, continueAddr);
+      // Fall through = not equal: jump to fail label
+      builder.addForwardRef(ctx.failLabel);
+      builder.emitJump(OPCODE_MAP.get('jump')!, 0);
+      // continueAddr: success path
+    }
+    return true;
+  }
+
+  if (a.mapping && b.mapping) {
+    // Both are variables: copy a to b
+    emitLoad(builder, a.mapping);
+    emitStore(builder, b.mapping);
+    return true;
+  }
+
+  return false;
 }

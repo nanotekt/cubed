@@ -1,26 +1,25 @@
 /**
- * Simplified CUBE type checker.
- * Phase 1: All variables default to Int (18-bit).
- * Validates predicate argument counts and constructor arity.
- * Full Hindley-Milner inference deferred to a future phase.
+ * CUBE type checker.
+ * Combines structural validation (arity checks) with
+ * Hindley-Milner type inference.
  */
 import type { CompileError } from '../types';
 import type { ResolvedProgram } from './resolver';
 import { SymbolKind } from './resolver';
+import { inferProgram } from './inference';
 
 export function typeCheck(resolved: ResolvedProgram): { errors: CompileError[] } {
   const errors: CompileError[] = [];
   const { program, symbols } = resolved;
 
+  // Structural validation: arity and parameter checks
   for (const item of program.conjunction.items) {
     if (item.kind === 'application') {
       if (item.functor === '__node') continue;
 
       const sym = symbols.get(item.functor);
       if (sym && sym.params) {
-        // Check that required params are provided (for builtins with outputs)
         if (sym.kind === SymbolKind.BUILTIN) {
-          // Builtins like plus/minus/times need at least 2 of 3 args in forward mode
           const provided = item.args.map(a => a.name);
           const missing = sym.params.filter(p => !provided.includes(p));
           if (sym.name === 'greater' || sym.name === 'not' || sym.name === 'equal') {
@@ -32,13 +31,11 @@ export function typeCheck(resolved: ResolvedProgram): { errors: CompileError[] }
               });
             }
           }
-          // For plus/minus/times: need at least 2 inputs in Phase 1
         }
       }
     }
 
     if (item.kind === 'predicate_def') {
-      // Check clauses reference valid predicates
       for (const clause of item.clauses) {
         for (const ci of clause.items) {
           if (ci.kind === 'application' && ci.functor !== '__node') {
@@ -58,6 +55,12 @@ export function typeCheck(resolved: ResolvedProgram): { errors: CompileError[] }
         }
       }
     }
+  }
+
+  // If structural validation passes, run type inference
+  if (errors.length === 0) {
+    const { errors: inferErrors } = inferProgram(resolved);
+    errors.push(...inferErrors);
   }
 
   return { errors };

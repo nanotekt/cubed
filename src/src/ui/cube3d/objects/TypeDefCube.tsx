@@ -1,0 +1,68 @@
+import type { ReactNode } from 'react';
+import { Text } from '@react-three/drei';
+import type { SceneNode } from '../layoutEngine';
+
+interface TypeDefCubeProps {
+  node: SceneNode;
+  selected: boolean;
+  onHover: (id: string | null) => void;
+  onClick: (id: string) => void;
+  onDoubleClick: (id: string) => void;
+  children?: ReactNode;
+}
+
+export function TypeDefCube({ node, selected, onHover, onClick, onDoubleClick, children }: TypeDefCubeProps) {
+  return (
+    <group position={node.position}>
+      <mesh
+        renderOrder={1}
+        onPointerOver={() => onHover(node.id)}
+        onPointerOut={() => onHover(null)}
+        onClick={() => onClick(node.id)}
+        onDoubleClick={() => onDoubleClick(node.id)}
+      >
+        <boxGeometry args={node.size} />
+        <meshPhysicalMaterial
+          color={node.color}
+          transparent
+          opacity={node.opacity}
+          depthWrite={false}
+          roughness={0.3}
+          metalness={0.1}
+          side={2}
+        />
+      </mesh>
+      {selected && (
+        <mesh>
+          <boxGeometry args={node.size.map(s => s + 0.05) as [number, number, number]} />
+          <meshBasicMaterial color="#ffff00" wireframe />
+        </mesh>
+      )}
+      {/* Type name label */}
+      <Text
+        position={[0, node.size[1] / 2 + 0.2, 0]}
+        fontSize={0.25}
+        color="#dd88ff"
+        anchorX="center"
+        anchorY="bottom"
+        fontWeight="bold"
+      >
+        {node.label}
+      </Text>
+      {/* "type" annotation */}
+      <Text
+        position={[0, node.size[1] / 2 + 0.45, 0]}
+        fontSize={0.12}
+        color="#aa66cc"
+        anchorX="center"
+        anchorY="bottom"
+      >
+        type
+      </Text>
+      {/* Render children with inverse offset so their absolute positions remain correct */}
+      <group position={[-node.position[0], -node.position[1], -node.position[2]]}>
+        {children}
+      </group>
+    </group>
+  );
+}

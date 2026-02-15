@@ -8,6 +8,8 @@ import { ApplicationCube } from './objects/ApplicationCube';
 import { HolderCube } from './objects/HolderCube';
 import { LiteralCube } from './objects/LiteralCube';
 import { PlaneBox } from './objects/PlaneBox';
+import { ConstructorCube } from './objects/ConstructorCube';
+import { TypeDefCube } from './objects/TypeDefCube';
 import { Pipe } from './objects/Pipe';
 
 /** Resets camera to frame the current scene graph whenever resetKey changes */
@@ -138,6 +140,32 @@ export function CubeScene({ sceneGraph, selectedId, hoveredId, onHover, onClick,
           <PlaneBox key={node.id} node={node}>
             {renderedChildren}
           </PlaneBox>
+        );
+      case 'constructor':
+        return (
+          <ConstructorCube
+            key={node.id}
+            node={node}
+            selected={node.id === activeId}
+            onHover={onHover}
+            onClick={onClick}
+            onDoubleClick={onDoubleClick}
+          >
+            {renderedChildren}
+          </ConstructorCube>
+        );
+      case 'type_definition':
+        return (
+          <TypeDefCube
+            key={node.id}
+            node={node}
+            selected={node.id === activeId}
+            onHover={onHover}
+            onClick={onClick}
+            onDoubleClick={onDoubleClick}
+          >
+            {renderedChildren}
+          </TypeDefCube>
         );
       default:
         return null;

@@ -31,6 +31,11 @@ export interface ResolvedSymbol {
   romAddr?: number;      // for ROM functions
   params?: string[];     // for user predicates
   def?: PredicateDef;    // for user predicates
+  // Constructor fields
+  tag?: number;          // constructor tag value (e.g. nil=0, cons=1)
+  fields?: string[];     // field names in order
+  tagBits?: number;      // bits needed to encode the tag
+  parentType?: string;   // parent type name (e.g. "List")
 }
 
 export interface ResolvedProgram {
@@ -150,6 +155,27 @@ function collectDefs(conjunction: Conjunction, symbols: Map<string, ResolvedSymb
         collectDefs(clause, symbols, errors);
       }
     }
+
+    if (item.kind === 'type_def') {
+      // Register each variant as a constructor symbol
+      const numVariants = item.variants.length;
+      const tagBits = numVariants <= 1 ? 0 : Math.ceil(Math.log2(numVariants));
+      for (let i = 0; i < numVariants; i++) {
+        const v = item.variants[i];
+        if (symbols.has(v.name)) {
+          errors.push({ line: v.loc.line, col: v.loc.col, message: `Redefinition of constructor '${v.name}'` });
+        }
+        symbols.set(v.name, {
+          kind: SymbolKind.CONSTRUCTOR,
+          name: v.name,
+          tag: i,
+          fields: v.fields.map(f => f.name),
+          tagBits,
+          parentType: item.name,
+          params: v.fields.map(f => f.name), // allow named-arg syntax for constructors
+        });
+      }
+    }
   }
 }
 
@@ -171,7 +197,7 @@ function resolveItem(item: ConjunctionItem, symbols: Map<string, ResolvedSymbol>
       break;
 
     case 'type_def':
-      // Type defs don't need variable resolution in Phase 1
+      // Constructors registered in collectDefs; resolve field type references
       break;
 
     case 'unification':
@@ -191,12 +217,13 @@ function resolveApplication(app: Application, symbols: Map<string, ResolvedSymbo
   const sym = symbols.get(app.functor);
   if (!sym) {
     errors.push({ line: app.loc.line, col: app.loc.col, message: `Undefined predicate or function: '${app.functor}'` });
-  } else if (sym.kind === SymbolKind.BUILTIN || sym.kind === SymbolKind.USER_PRED) {
-    // Validate argument names match parameter names
+  } else if (sym.kind === SymbolKind.BUILTIN || sym.kind === SymbolKind.USER_PRED || sym.kind === SymbolKind.CONSTRUCTOR) {
+    // Validate argument names match parameter/field names
     if (sym.params) {
       for (const arg of app.args) {
         if (!sym.params.includes(arg.name)) {
-          errors.push({ line: arg.loc.line, col: arg.loc.col, message: `Unknown parameter '${arg.name}' for '${app.functor}'` });
+          const label = sym.kind === SymbolKind.CONSTRUCTOR ? 'field' : 'parameter';
+          errors.push({ line: arg.loc.line, col: arg.loc.col, message: `Unknown ${label} '${arg.name}' for '${app.functor}'` });
         }
       }
     }
@@ -214,14 +241,23 @@ function resolveTerm(term: Term, symbols: Map<string, ResolvedSymbol>, variables
       break;
     case 'literal':
       break;
-    case 'app_term':
-      if (!symbols.has(term.functor)) {
+    case 'app_term': {
+      const sym = symbols.get(term.functor);
+      if (!sym) {
         errors.push({ line: term.loc.line, col: term.loc.col, message: `Undefined constructor or predicate: '${term.functor}'` });
+      } else if (sym.kind === SymbolKind.CONSTRUCTOR && sym.fields) {
+        // Validate field names
+        for (const arg of term.args) {
+          if (!sym.fields.includes(arg.name)) {
+            errors.push({ line: arg.loc.line, col: arg.loc.col, message: `Unknown field '${arg.name}' for constructor '${term.functor}'` });
+          }
+        }
       }
       for (const arg of term.args) {
         resolveTerm(arg.value, symbols, variables, errors);
       }
       break;
+    }
     case 'rename':
       break;
   }

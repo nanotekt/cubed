@@ -9,7 +9,7 @@
  */
 import type {
   CubeProgram, Conjunction, ConjunctionItem,
-  PredicateDef, Application, Unification, Term,
+  PredicateDef, Application, Unification, Term, TypeDef,
 } from '../../core/cube/ast';
 
 // ---- Scene graph types ----
@@ -20,7 +20,9 @@ export type SceneNodeType =
   | 'holder'
   | 'literal'
   | 'port'
-  | 'plane';
+  | 'plane'
+  | 'constructor'
+  | 'type_definition';
 
 export interface PortInfo {
   id: string;
@@ -69,6 +71,10 @@ const COLORS = {
   literal: '#ddaa44',
   pipe: '#44dddd',
   plane: '#335533',
+  constructor: '#cc44aa',
+  type_def: '#aa66cc',
+  variant: '#9955bb',
+  field: '#bb88dd',
   unknown: '#888888',
 };
 
@@ -161,7 +167,17 @@ export function layoutAST(program: CubeProgram): SceneGraph {
   const holderPositions = new Map<string, [number, number, number]>();
   const holderNodeIds = new Map<string, string>(); // variable name → node id
 
-  layoutConjunction(program.conjunction, [0, 0, 0], nodes, pipes, holderPositions, holderNodeIds);
+  // Collect constructor names from type definitions for coloring
+  const constructorNames = new Set<string>();
+  for (const item of program.conjunction.items) {
+    if (item.kind === 'type_def') {
+      for (const variant of item.variants) {
+        constructorNames.add(variant.name);
+      }
+    }
+  }
+
+  layoutConjunction(program.conjunction, [0, 0, 0], nodes, pipes, holderPositions, holderNodeIds, undefined, constructorNames);
 
   return { nodes, pipes };
 }
@@ -176,11 +192,12 @@ function layoutConjunction(
   holderPositions: Map<string, [number, number, number]>,
   holderNodeIds: Map<string, string>,
   parentId?: string,
+  constructorNames?: Set<string>,
 ): number {
   let xCursor = origin[0];
 
   for (const item of conj.items) {
-    const width = layoutItem(item, [xCursor, origin[1], origin[2]], nodes, pipes, holderPositions, holderNodeIds, parentId);
+    const width = layoutItem(item, [xCursor, origin[1], origin[2]], nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
     xCursor += width + ITEM_SPACING_X;
   }
 
@@ -197,29 +214,17 @@ function layoutItem(
   holderPositions: Map<string, [number, number, number]>,
   holderNodeIds: Map<string, string>,
   parentId?: string,
+  constructorNames?: Set<string>,
 ): number {
   switch (item.kind) {
     case 'predicate_def':
-      return layoutPredicateDef(item, pos, nodes, pipes, holderPositions, holderNodeIds, parentId);
+      return layoutPredicateDef(item, pos, nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
     case 'application':
-      return layoutApplication(item, pos, nodes, pipes, holderPositions, holderNodeIds, parentId);
+      return layoutApplication(item, pos, nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
     case 'unification':
-      return layoutUnification(item, pos, nodes, pipes, holderPositions, holderNodeIds, parentId);
+      return layoutUnification(item, pos, nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
     case 'type_def':
-      // Type defs are compile-time only; render as a small label
-      nodes.push({
-        id: nextId('typedef'),
-        type: 'definition',
-        label: item.name,
-        position: pos,
-        size: [1.2, 0.6, 0.6],
-        color: COLORS.unknown,
-        transparent: true,
-        opacity: 0.3,
-        parentId,
-        ports: [],
-      });
-      return 1.2;
+      return layoutTypeDef(item, pos, nodes, parentId);
   }
 }
 
@@ -233,6 +238,7 @@ function layoutPredicateDef(
   holderPositions: Map<string, [number, number, number]>,
   holderNodeIds: Map<string, string>,
   parentId?: string,
+  constructorNames?: Set<string>,
 ): number {
   const defId = nextId('def');
   const clauseNodes: SceneNode[][] = [];
@@ -251,7 +257,7 @@ function layoutPredicateDef(
     ];
 
     const width = layoutConjunction(
-      def.clauses[i], innerOrigin, clauseSceneNodes, clauseScenePipes, holderPositions, holderNodeIds, defId,
+      def.clauses[i], innerOrigin, clauseSceneNodes, clauseScenePipes, holderPositions, holderNodeIds, defId, constructorNames,
     );
     maxClauseWidth = Math.max(maxClauseWidth, width);
     clauseNodes.push(clauseSceneNodes);
@@ -327,6 +333,108 @@ function layoutPredicateDef(
   return totalWidth;
 }
 
+// ---- Type Definition ----
+
+const VARIANT_SIZE = 0.8;
+const FIELD_SIZE = 0.5;
+const VARIANT_SPACING_Y = 1.4;
+const FIELD_SPACING_X = 1.2;
+
+function layoutTypeDef(
+  typeDef: TypeDef,
+  origin: [number, number, number],
+  nodes: SceneNode[],
+  parentId?: string,
+): number {
+  const defId = nextId('typedef');
+  let maxVariantWidth = 0;
+
+  // Layout each variant stacked on Y (sum type = disjunction)
+  for (let vi = 0; vi < typeDef.variants.length; vi++) {
+    const variant = typeDef.variants[vi];
+    const variantY = origin[1] - vi * VARIANT_SPACING_Y;
+    const isNullary = variant.fields.length === 0;
+
+    // Variant constructor node
+    const variantId = nextId('variant');
+    const variantPos: [number, number, number] = [
+      origin[0] + DEF_PADDING,
+      variantY,
+      origin[2],
+    ];
+
+    nodes.push({
+      id: variantId,
+      type: 'constructor',
+      label: variant.name,
+      position: variantPos,
+      size: [VARIANT_SIZE, VARIANT_SIZE, VARIANT_SIZE],
+      color: COLORS.constructor,
+      transparent: isNullary,
+      opacity: isNullary ? 0.7 : 1,
+      parentId: defId,
+      ports: [],
+    });
+
+    let variantWidth = VARIANT_SIZE;
+
+    // Layout fields horizontally (product type = conjunction)
+    for (let fi = 0; fi < variant.fields.length; fi++) {
+      const field = variant.fields[fi];
+      const fieldPos: [number, number, number] = [
+        origin[0] + DEF_PADDING + VARIANT_SIZE / 2 + FIELD_SPACING_X * (fi + 1),
+        variantY,
+        origin[2],
+      ];
+      const fieldId = nextId('field');
+
+      const typeLabel = field.type.kind === 'type_var' ? field.type.name
+        : field.type.kind === 'type_app' ? field.type.constructor
+        : '?';
+
+      nodes.push({
+        id: fieldId,
+        type: 'holder',
+        label: `${field.name}: ${typeLabel}`,
+        position: fieldPos,
+        size: [FIELD_SIZE, FIELD_SIZE, FIELD_SIZE],
+        color: COLORS.field,
+        transparent: true,
+        opacity: 0.6,
+        parentId: defId,
+        ports: [],
+      });
+
+      variantWidth = FIELD_SPACING_X * (fi + 1) + FIELD_SIZE;
+    }
+
+    maxVariantWidth = Math.max(maxVariantWidth, variantWidth);
+  }
+
+  // Outer type definition box
+  const totalWidth = maxVariantWidth + DEF_PADDING * 2;
+  const totalHeight = Math.max(typeDef.variants.length * VARIANT_SPACING_Y, 1.0);
+
+  nodes.push({
+    id: defId,
+    type: 'type_definition',
+    label: typeDef.name,
+    position: [
+      origin[0] + totalWidth / 2 - APP_SIZE / 2,
+      origin[1] - totalHeight / 2 + VARIANT_SPACING_Y / 2,
+      origin[2],
+    ],
+    size: [totalWidth, totalHeight, 1.2],
+    color: COLORS.type_def,
+    transparent: true,
+    opacity: 0.15,
+    parentId,
+    ports: [],
+  });
+
+  return totalWidth;
+}
+
 // ---- Application ----
 
 function layoutApplication(
@@ -337,11 +445,13 @@ function layoutApplication(
   holderPositions: Map<string, [number, number, number]>,
   holderNodeIds: Map<string, string>,
   parentId?: string,
+  constructorNames?: Set<string>,
 ): number {
   if (app.functor === '__node') return 0; // node directive is invisible
 
-  const appId = nextId('app');
-  const color = appColor(app.functor);
+  const isConstructor = constructorNames?.has(app.functor) ?? false;
+  const appId = nextId(isConstructor ? 'ctor' : 'app');
+  const color = isConstructor ? COLORS.constructor : appColor(app.functor);
 
   // Build ports from args
   const ports: PortInfo[] = app.args.map((arg, i) => {
@@ -367,7 +477,7 @@ function layoutApplication(
 
   nodes.push({
     id: appId,
-    type: 'application',
+    type: isConstructor ? 'constructor' : 'application',
     label: app.functor,
     position: pos,
     size: [APP_SIZE, APP_SIZE, APP_SIZE],
@@ -383,7 +493,7 @@ function layoutApplication(
   for (let i = 0; i < app.args.length; i++) {
     const arg = app.args[i];
     const port = ports[i];
-    layoutTermForPort(arg.value, port, appId, pos, nodes, pipes, holderPositions, holderNodeIds, appId);
+    layoutTermForPort(arg.value, port, appId, pos, nodes, pipes, holderPositions, holderNodeIds, appId, constructorNames);
   }
 
   return APP_SIZE;
@@ -399,6 +509,7 @@ function layoutUnification(
   holderPositions: Map<string, [number, number, number]>,
   holderNodeIds: Map<string, string>,
   parentId?: string,
+  constructorNames?: Set<string>,
 ): number {
   // Left holder for the variable
   const holderId = nextId('holder');
@@ -422,7 +533,7 @@ function layoutUnification(
 
   // Right side: the term
   const termPos: [number, number, number] = [pos[0] + 1.5, pos[1], pos[2]];
-  const termNodeId = layoutTerm(uni.term, termPos, nodes, pipes, holderPositions, holderNodeIds, parentId);
+  const termNodeId = layoutTerm(uni.term, termPos, nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
 
   // Pipe from holder to term
   pipes.push({
@@ -448,9 +559,27 @@ function layoutTerm(
   holderPositions: Map<string, [number, number, number]>,
   holderNodeIds: Map<string, string>,
   parentId?: string,
+  constructorNames?: Set<string>,
 ): string | null {
   switch (term.kind) {
     case 'var': {
+      // Check if this is a nullary constructor (e.g. `true`, `nil`)
+      if (constructorNames?.has(term.name)) {
+        const ctorId = nextId('ctor');
+        nodes.push({
+          id: ctorId,
+          type: 'constructor',
+          label: term.name,
+          position: pos,
+          size: [LITERAL_SIZE, LITERAL_SIZE, LITERAL_SIZE],
+          color: COLORS.constructor,
+          transparent: false,
+          opacity: 1,
+          parentId,
+          ports: [],
+        });
+        return ctorId;
+      }
       const existing = holderPositions.get(term.name);
       if (existing) {
         // Pipe to existing holder
@@ -500,7 +629,7 @@ function layoutTerm(
         args: term.args,
         loc: term.loc,
       };
-      layoutApplication(inlineApp, pos, nodes, pipes, holderPositions, holderNodeIds, parentId);
+      layoutApplication(inlineApp, pos, nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
       // The application node was just added as the last node
       return nodes[nodes.length - 1]?.id ?? null;
     }
@@ -521,6 +650,7 @@ function layoutTermForPort(
   holderPositions: Map<string, [number, number, number]>,
   holderNodeIds: Map<string, string>,
   parentId?: string,
+  constructorNames?: Set<string>,
 ): void {
   const offset = port.side === 'right' ? 1.2 : -1.2;
   const termPos: [number, number, number] = [
@@ -531,6 +661,24 @@ function layoutTermForPort(
 
   switch (term.kind) {
     case 'var': {
+      // Check if this is a nullary constructor
+      if (constructorNames?.has(term.name)) {
+        const ctorId = nextId('ctor');
+        nodes.push({
+          id: ctorId,
+          type: 'constructor',
+          label: term.name,
+          position: termPos,
+          size: [LITERAL_SIZE, LITERAL_SIZE, LITERAL_SIZE],
+          color: COLORS.constructor,
+          transparent: false,
+          opacity: 1,
+          parentId,
+          ports: [],
+        });
+        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: ctorId });
+        break;
+      }
       const existing = holderPositions.get(term.name);
       if (existing) {
         // Pipe from port to existing holder
@@ -581,7 +729,7 @@ function layoutTermForPort(
         args: term.args,
         loc: term.loc,
       };
-      layoutApplication(inlineApp, termPos, nodes, pipes, holderPositions, holderNodeIds, parentId);
+      layoutApplication(inlineApp, termPos, nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
       const inlineAppNodeId = nodes[nodes.length - 1]?.id;
       pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: inlineAppNodeId });
       break;

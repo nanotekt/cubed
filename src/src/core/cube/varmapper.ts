@@ -24,6 +24,8 @@ export interface VariableMap {
   vars: Map<string, VarMapping>;
   /** Next available RAM address (allocated downward from 0x3F) */
   nextRamAddr: number;
+  /** Next available field storage address (allocated upward from 0x20) */
+  nextFieldAddr: number;
 }
 
 export function mapVariables(variableNames: Set<string>): VariableMap {
@@ -43,5 +45,12 @@ export function mapVariables(variableNames: Set<string>): VariableMap {
     nextRamAddr--;
   }
 
-  return { vars, nextRamAddr };
+  return { vars, nextRamAddr, nextFieldAddr: 0x20 };
+}
+
+/** Allocate a contiguous block of RAM for constructor fields. Returns the base address. */
+export function allocateFields(varMap: VariableMap, count: number): number {
+  const base = varMap.nextFieldAddr;
+  varMap.nextFieldAddr += count;
+  return base;
 }

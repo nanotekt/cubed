@@ -43,7 +43,7 @@ export function compileCube(source: string): CompiledProgram {
   const varMap = mapVariables(resolved.variables);
 
   // Emit code
-  const nodes = emitCode(resolved, plan, varMap);
+  const { nodes, warnings } = emitCode(resolved, plan, varMap);
 
-  return { nodes, errors: [] };
+  return { nodes, errors: warnings };
 }
