@@ -1,0 +1,5 @@
+#!/bin/bash
+# cubec — CUBE language compiler for GA144
+# Bundles and runs the TypeScript compiler using esbuild
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec "$SCRIPT_DIR/node_modules/.bin/esbuild" --bundle "$SCRIPT_DIR/cubec.ts" --platform=node --format=esm --log-level=silent 2>/dev/null | node --input-type=module - "$@"

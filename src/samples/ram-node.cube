@@ -1,0 +1,55 @@
+-- Fast RAM Node (from fast-ram-node.aforth)
+-- Two-node memory system: node 1 provides 61-word random
+-- access storage, node 0 is the client that reads/writes.
+--
+-- In the reference, node 1's code is minimal:
+--   @b -> if negative: negate to get address, set A, read @, send !b
+--   if positive: negate to get address, set A, read value @b, store !
+-- The sign bit of the address encodes read vs write.
+--
+-- This models the logical read/write protocol between
+-- a client node and a RAM node via port communication.
+
+node 0
+
+/\
+
+-- Write command: send negated address then value to RAM node
+-- In F18A, negative address = write, positive = read
+ram_write = lambda{addr:Int, val:Int}.
+  (minus{a=0, b=addr, c=neg_addr} /\
+   send{port=0x1D5, value=neg_addr} /\
+   send{port=0x1D5, value=val})
+
+/\
+
+-- Read command: send positive address, receive value
+ram_read = lambda{addr:Int, val:Int}.
+  (send{port=0x1D5, value=addr} /\
+   recv{port=0x1D5, value=val})
+
+/\
+
+-- Store three values at addresses 5, 3, 59
+ram_write{addr=5, val=55}
+
+/\
+
+ram_write{addr=3, val=2}
+
+/\
+
+ram_write{addr=59, val=88}
+
+/\
+
+-- Read them back
+ram_read{addr=3, val=v1}
+
+/\
+
+ram_read{addr=59, val=v2}
+
+/\
+
+ram_read{addr=5, val=v3}

@@ -1,10 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { GA144 } from '../core/ga144';
-import type { GA144Snapshot, CompileError } from '../core/types';
+import type { GA144Snapshot, CompileError, CompiledProgram } from '../core/types';
 import { ROM_DATA } from '../core/rom-data';
 import { compile } from '../core/assembler';
 import { compileCube, tokenizeCube, parseCube } from '../core/cube';
-import type { CubeProgram } from '../core/cube';
+import type { CubeProgram, CubeCompileResult } from '../core/cube';
 import type { EditorLanguage } from '../ui/editor/CodeEditor';
 
 export function useEmulator() {
@@ -14,8 +14,10 @@ export function useEmulator() {
   const [isRunning, setIsRunning] = useState(false);
   const [compileErrors, setCompileErrors] = useState<CompileError[]>([]);
   const [stepsPerFrame, setStepsPerFrame] = useState(10);
-  const [language, setLanguage] = useState<EditorLanguage>('arrayforth');
+  const [language, setLanguage] = useState<EditorLanguage>('cube');
   const [cubeAst, setCubeAst] = useState<CubeProgram | null>(null);
+  const [cubeCompileResult, setCubeCompileResult] = useState<CubeCompileResult | null>(null);
+  const [compiledProgram, setCompiledProgram] = useState<CompiledProgram | null>(null);
   const runningRef = useRef(false);
   const animFrameRef = useRef<number>(0);
 
@@ -105,10 +107,22 @@ export function useEmulator() {
       setCubeAst(null);
     }
 
-    const result = language === 'cube' ? compileCube(source) : compile(source);
-    setCompileErrors(result.errors);
-    if (result.errors.length === 0) {
-      ga144Ref.current.load(result);
+    if (language === 'cube') {
+      const result = compileCube(source);
+      setCompileErrors(result.errors);
+      setCubeCompileResult(result.errors.length === 0 ? result : null);
+      setCompiledProgram(result.errors.length === 0 ? result : null);
+      if (result.errors.length === 0) {
+        ga144Ref.current.load(result);
+      }
+    } else {
+      const result = compile(source);
+      setCompileErrors(result.errors);
+      setCubeCompileResult(null);
+      setCompiledProgram(result.errors.length === 0 ? result : null);
+      if (result.errors.length === 0) {
+        ga144Ref.current.load(result);
+      }
     }
     updateSnapshot();
   }, [stop, updateSnapshot, language]);
@@ -128,6 +142,8 @@ export function useEmulator() {
     stepsPerFrame,
     language,
     cubeAst,
+    cubeCompileResult,
+    compiledProgram,
     step,
     stepN,
     run,

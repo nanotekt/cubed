@@ -1,0 +1,107 @@
+-- SHA-256 Hash (Multi-Node, AN001 Partner Pattern)
+-- Low-16 partner node: handles bits 0-15 of 32-bit values.
+-- Sends carry to high-16 partner via UP port.
+--
+-- SHA-256 uses four auxiliary functions per round:
+--   Ch(e,f,g)  = (e AND f) XOR (NOT e AND g)
+--   Maj(a,b,c) = (a AND b) XOR (a AND c) XOR (b AND c)
+--   Sigma0(a)  = ROTR2(a) XOR ROTR13(a) XOR ROTR22(a)
+--   Sigma1(e)  = ROTR6(e) XOR ROTR11(e) XOR ROTR25(e)
+--
+-- On 18-bit F18A nodes, rotation is decomposed into
+-- shifts on the low-16 partner; the high-16 partner
+-- supplies the wrapped bits via port communication.
+
+node 205
+
+/\
+
+-- Ch(e, f, g) = (e AND f) XOR (NOT(e) AND g)
+-- "Choice": e selects between f and g
+sha_ch = lambda{e:Int, f:Int, g:Int, r:Int}.
+  (band{a=e, b=f, c=ef} /\
+   bnot{a=e, b=ne} /\
+   band{a=ne, b=g, c=neg} /\
+   bxor{a=ef, b=neg, c=r})
+
+/\
+
+-- Maj(a, b, c) = (a AND b) XOR (a AND c) XOR (b AND c)
+-- "Majority": result bit is 1 if at least 2 of a,b,c are 1
+sha_maj = lambda{a:Int, b:Int, c:Int, r:Int}.
+  (band{a=a, b=b, c=ab} /\
+   band{a=a, b=c, c=ac} /\
+   band{a=b, b=c, c=bc} /\
+   bxor{a=ab, b=ac, c=t1} /\
+   bxor{a=t1, b=bc, c=r})
+
+/\
+
+-- Sigma0(a) = ROTR2(a) XOR ROTR13(a) XOR ROTR22(a)
+-- Low-16 approximation: use shifts, receive wrapped bits from partner
+sha_sigma0 = lambda{a:Int, r:Int}.
+  (shr{a=a, n=2, c=r2} /\
+   recv{port=0x145, value=wrap2} /\
+   bor{a=r2, b=wrap2, c=rot2} /\
+   shr{a=a, n=13, c=r13} /\
+   recv{port=0x145, value=wrap13} /\
+   bor{a=r13, b=wrap13, c=rot13} /\
+   bxor{a=rot2, b=rot13, c=t1} /\
+   shr{a=a, n=6, c=r6} /\
+   recv{port=0x145, value=wrap6} /\
+   bor{a=r6, b=wrap6, c=rot22} /\
+   bxor{a=t1, b=rot22, c=r})
+
+/\
+
+-- Sigma1(e) = ROTR6(e) XOR ROTR11(e) XOR ROTR25(e)
+sha_sigma1 = lambda{e:Int, r:Int}.
+  (shr{a=e, n=6, c=r6} /\
+   recv{port=0x145, value=wrap6} /\
+   bor{a=r6, b=wrap6, c=rot6} /\
+   shr{a=e, n=11, c=r11} /\
+   recv{port=0x145, value=wrap11} /\
+   bor{a=r11, b=wrap11, c=rot11} /\
+   bxor{a=rot6, b=rot11, c=t1} /\
+   shr{a=e, n=9, c=r9} /\
+   recv{port=0x145, value=wrap9} /\
+   bor{a=r9, b=wrap9, c=rot25} /\
+   bxor{a=t1, b=rot25, c=r})
+
+/\
+
+-- One SHA-256 compression step (low 16 bits):
+--   T1 = h + Sigma1(e) + Ch(e,f,g) + K + W
+--   T2 = Sigma0(a) + Maj(a,b,c)
+--   Send carries to high partner, mask to 16 bits
+sha_step = lambda{a:Int, b:Int, c:Int, d:Int,
+                   e:Int, f:Int, g:Int, h:Int,
+                   w:Int, k:Int, newd:Int, newh:Int}.
+  (sha_sigma1{e=e, r=sig1} /\
+   sha_ch{e=e, f=f, g=g, r=ch} /\
+   plus{a=h, b=sig1, c=s1} /\
+   plus{a=s1, b=ch, c=s2} /\
+   plus{a=s2, b=k, c=s3} /\
+   plus{a=s3, b=w, c=t1} /\
+   shr{a=t1, n=16, c=carry1} /\
+   send{port=0x145, value=carry1} /\
+   band{a=t1, b=0xFFFF, c=t1m} /\
+   sha_sigma0{a=a, r=sig0} /\
+   sha_maj{a=a, b=b, c=c, r=maj} /\
+   plus{a=sig0, b=maj, c=t2} /\
+   shr{a=t2, n=16, c=carry2} /\
+   send{port=0x145, value=carry2} /\
+   band{a=t2, b=0xFFFF, c=t2m} /\
+   plus{a=d, b=t1m, c=newd} /\
+   plus{a=t1m, b=t2m, c=newh})
+
+/\
+
+-- Execute first SHA-256 round on empty message
+-- Initial hash (low 16 bits of SHA-256 IV):
+--   a=0xE667  b=0xAE85  c=0xF372  d=0xF53A
+--   e=0x6B17  f=0xBB67  c2=0xC1B0  d2=0x5BE0
+-- K[0] low 16 = 0x2F98, W[0] = 0x0000 (first word of padded empty msg)
+sha_step{a=0xE667, b=0xAE85, c=0xF372, d=0xF53A,
+         e=0x6B17, f=0xBB67, g=0xC1B0, h=0x5BE0,
+         w=0x8000, k=0x2F98, newd=nd, newh=nh}

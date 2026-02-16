@@ -1,0 +1,61 @@
+-- Lucas Series Generator (from lucas-series.aforth)
+-- Two-node pipeline: node 608 generates Lucas numbers,
+-- node 708 reads and outputs them via serial.
+--
+-- Lucas sequence: 2, 1, 3, 4, 7, 11, 18, 29, ...
+-- Like Fibonacci but starts with L(0)=2, L(1)=1.
+--
+-- In the reference, node 608 computes and sends values
+-- north to node 708 which prints them over serial.
+
+node 608
+
+/\
+
+-- Generate the next Lucas number from the previous two.
+-- L(n) = L(n-1) + L(n-2)
+lucas_next = lambda{prev2:Int, prev1:Int, result:Int}.
+  plus{a=prev2, b=prev1, c=result}
+
+/\
+
+-- Send value to the serial output node above
+lucas_send = lambda{val:Int}.
+  send{port=0x145, value=val}
+
+/\
+
+-- Compute 6 steps of the Lucas sequence
+-- Starting: L(0)=2, L(1)=1
+
+-- Step 0: send L(0)
+lucas_send{val=2}
+
+/\
+
+-- Step 1: send L(1)
+lucas_send{val=1}
+
+/\
+
+-- Step 2: L(2) = 2 + 1 = 3
+lucas_next{prev2=2, prev1=1, result=l2}
+/\ lucas_send{val=l2}
+
+/\
+
+-- Step 3: L(3) = 1 + 3 = 4
+lucas_next{prev2=1, prev1=l2, result=l3}
+/\ lucas_send{val=l3}
+
+/\
+
+-- Step 4: L(4) = 3 + 4 = 7
+lucas_next{prev2=l2, prev1=l3, result=l4}
+/\ lucas_send{val=l4}
+
+/\
+
+-- Step 5: L(5) = 4 + 7 = 11
+lucas_next{prev2=l3, prev1=l4, result=l5}
+/\ lucas_send{val=l5}

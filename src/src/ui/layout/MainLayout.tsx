@@ -1,15 +1,21 @@
 import React from 'react';
-import { Box } from '@mui/material';
+import { Box, Tabs, Tab } from '@mui/material';
+import EditIcon from '@mui/icons-material/Edit';
+import MemoryIcon from '@mui/icons-material/Memory';
+import OutputIcon from '@mui/icons-material/Terminal';
 
 interface MainLayoutProps {
   toolbar: React.ReactNode;
-  chipGrid: React.ReactNode;
-  cubeRenderer?: React.ReactNode;
-  editor: React.ReactNode;
-  detailPanel: React.ReactNode;
+  editorTab: React.ReactNode;
+  emulatorTab: React.ReactNode;
+  outputTab: React.ReactNode;
+  activeTab: number;
+  onTabChange: (tab: number) => void;
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ toolbar, chipGrid, cubeRenderer, editor, detailPanel }) => {
+export const MainLayout: React.FC<MainLayoutProps> = ({
+  toolbar, editorTab, emulatorTab, outputTab, activeTab, onTabChange,
+}) => {
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Toolbar */}
@@ -21,32 +27,41 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ toolbar, chipGrid, cubeR
         {toolbar}
       </Box>
 
-      {/* Main content */}
-      <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* Left: Chip grid or CUBE 3D renderer */}
-        <Box sx={{
-          width: 510,
-          flexShrink: 0,
-          overflow: cubeRenderer ? 'hidden' : 'auto',
-          borderRight: '1px solid #333',
-          p: cubeRenderer ? 0 : 1,
-        }}>
-          {cubeRenderer ?? chipGrid}
-        </Box>
+      {/* Tab bar */}
+      <Box sx={{
+        borderBottom: '1px solid #333',
+        backgroundColor: '#1a1a1a',
+        flexShrink: 0,
+      }}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, v) => onTabChange(v)}
+          sx={{
+            minHeight: 32,
+            '& .MuiTab-root': {
+              minHeight: 32,
+              py: 0,
+              fontSize: '12px',
+              textTransform: 'none',
+            },
+          }}
+        >
+          <Tab icon={<EditIcon sx={{ fontSize: 14 }} />} iconPosition="start" label="Editor" />
+          <Tab icon={<MemoryIcon sx={{ fontSize: 14 }} />} iconPosition="start" label="Emulator" />
+          <Tab icon={<OutputIcon sx={{ fontSize: 14 }} />} iconPosition="start" label="Output" />
+        </Tabs>
+      </Box>
 
-        {/* Center: Code editor */}
-        <Box sx={{ flex: 1, overflow: 'hidden' }}>
-          {editor}
+      {/* Tab content */}
+      <Box sx={{ flex: 1, overflow: 'hidden' }}>
+        <Box sx={{ display: activeTab === 0 ? 'flex' : 'none', height: '100%' }}>
+          {editorTab}
         </Box>
-
-        {/* Right: Detail panel */}
-        <Box sx={{
-          width: 380,
-          flexShrink: 0,
-          overflow: 'auto',
-          borderLeft: '1px solid #333',
-        }}>
-          {detailPanel}
+        <Box sx={{ display: activeTab === 1 ? 'flex' : 'none', height: '100%' }}>
+          {emulatorTab}
+        </Box>
+        <Box sx={{ display: activeTab === 2 ? 'flex' : 'none', height: '100%' }}>
+          {outputTab}
         </Box>
       </Box>
     </Box>

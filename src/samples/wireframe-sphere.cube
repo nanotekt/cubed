@@ -1,0 +1,207 @@
+-- Wireframe Sphere VGA Output (AN020 Pattern)
+-- Demonstrates 3D wireframe sphere rendering on the GA144
+-- using fixed-point integer math and a multi-node pipeline.
+--
+-- Architecture (inspired by GreenArrays AN020 1080P demo):
+--   Node 608: Geometry generator — pre-computed sphere vertices
+--   Node 609: Perspective projection — 3D to 2D transform
+--   Node 610: VGA pixel output — receives screen coordinates
+--
+-- In a full implementation, node 610 would relay screen coords
+-- through wire nodes to node 117 (9-bit DAC) for analog VGA
+-- signal generation. Hsync/Vsync timing nodes and line-drawing
+-- nodes would complete the pipeline. Here we demonstrate the
+-- vertex computation and projection stages for 4 points of a
+-- unit sphere.
+--
+-- Fixed-point Q8.8 format: 256 = 1.0, 181 ≈ 0.707 (sin 45°)
+-- 18-bit words give range [-512.0, +511.996], sufficient for
+-- unit sphere coordinates and screen positions.
+
+-- ============================================================
+-- GEOMETRY NODE: pre-computed sphere vertices
+-- ============================================================
+
+node 608
+
+/\
+
+-- Fixed-point Q8.8 multiply: c = (a * b) >> 8
+-- Scales the raw product back to Q8.8 representation.
+-- E.g., fpmul{a=181, b=181, c=r} gives r ≈ 128 (0.5)
+fpmul = lambda{a:Int, b:Int, c:Int}.
+  (times{a=a, b=b, c=raw} /\
+   shr{a=raw, n=8, c=c})
+
+/\
+
+-- Pre-computed sphere vertex lookup table (Q8.8).
+-- Unit sphere vertices at selected latitude/longitude:
+--   V0: lat=0  lon=0   -> (1.0, 0.0, 0.0)   = (256, 0, 0)
+--   V1: lat=0  lon=45  -> (0.707, 0.707, 0.0)= (181, 181, 0)
+--   V2: lat=0  lon=90  -> (0.0, 1.0, 0.0)    = (0, 256, 0)
+--   V3: lat=45 lon=0   -> (0.707, 0.0, 0.707) = (181, 0, 181)
+--
+-- Formula: x = cos(lat)*cos(lon)
+--          y = cos(lat)*sin(lon)
+--          z = sin(lat)
+sphere_vtx = lambda{idx:Int, x:Int, y:Int, z:Int}.
+  (idx = 0 /\ x = 256 /\ y = 0   /\ z = 0
+   \/
+   idx = 1 /\ x = 181 /\ y = 181 /\ z = 0
+   \/
+   idx = 2 /\ x = 0   /\ y = 256 /\ z = 0
+   \/
+   idx = 3 /\ x = 181 /\ y = 0   /\ z = 181)
+
+/\
+
+-- Send one 3D vertex (x,y,z) to projection node via RIGHT port.
+-- Three blocking sends — projection node must read all three.
+-- Models the F18A pattern: right a! T ! T ! T !
+vtx_send = lambda{x:Int, y:Int, z:Int}.
+  (send{port=0x1D5, value=x} /\
+   send{port=0x1D5, value=y} /\
+   send{port=0x1D5, value=z})
+
+/\
+
+-- Emit vertex V0: equator, facing camera -> (256, 0, 0)
+sphere_vtx{idx=0, x=x0, y=y0, z=z0}
+/\ vtx_send{x=x0, y=y0, z=z0}
+
+/\
+
+-- Emit vertex V1: equator, 45 degrees -> (181, 181, 0)
+sphere_vtx{idx=1, x=x1, y=y1, z=z1}
+/\ vtx_send{x=x1, y=y1, z=z1}
+
+/\
+
+-- Emit vertex V2: equator, 90 degrees -> (0, 256, 0)
+sphere_vtx{idx=2, x=x2, y=y2, z=z2}
+/\ vtx_send{x=x2, y=y2, z=z2}
+
+/\
+
+-- Emit vertex V3: 45 latitude, facing camera -> (181, 0, 181)
+sphere_vtx{idx=3, x=x3, y=y3, z=z3}
+/\ vtx_send{x=x3, y=y3, z=z3}
+
+/\
+
+-- ============================================================
+-- PROJECTION NODE: 3D -> 2D perspective transform
+-- ============================================================
+
+node 609
+
+/\
+
+-- Receive one 3D vertex from geometry node via LEFT port.
+-- Blocks until all three coordinates arrive.
+vtx_recv = lambda{x:Int, y:Int, z:Int}.
+  (recv{port=0x175, value=x} /\
+   recv{port=0x175, value=y} /\
+   recv{port=0x175, value=z})
+
+/\
+
+-- Perspective projection: 3D -> 2D screen coordinates.
+-- Camera at origin looking along +X axis.
+-- Focal distance d = 512 (2.0 in Q8.8).
+--
+--   sx = (y * d) / (x + d)
+--   sy = (z * d) / (x + d)
+--
+-- Uses reverse-mode times for division:
+--   times{a=sx, b=xd, c=yd} solves sx = yd / xd
+-- This calls ROM divmod (available at 0x2D6 on basic nodes).
+project = lambda{x:Int, y:Int, z:Int, sx:Int, sy:Int}.
+  (plus{a=x, b=512, c=xd} /\
+   times{a=y, b=512, c=yd} /\
+   times{a=sx, b=xd, c=yd} /\
+   times{a=z, b=512, c=zd} /\
+   times{a=sy, b=xd, c=zd})
+
+/\
+
+-- Send projected 2D coordinates to VGA output node via RIGHT.
+-- In a full system these feed a Bresenham line-drawing node
+-- that rasterizes wireframe edges between adjacent vertices.
+coord_send = lambda{sx:Int, sy:Int}.
+  (send{port=0x1D5, value=sx} /\
+   send{port=0x1D5, value=sy})
+
+/\
+
+-- Project vertex V0
+vtx_recv{x=rx0, y=ry0, z=rz0}
+/\ project{x=rx0, y=ry0, z=rz0, sx=sx0, sy=sy0}
+/\ coord_send{sx=sx0, sy=sy0}
+
+/\
+
+-- Project vertex V1
+vtx_recv{x=rx1, y=ry1, z=rz1}
+/\ project{x=rx1, y=ry1, z=rz1, sx=sx1, sy=sy1}
+/\ coord_send{sx=sx1, sy=sy1}
+
+/\
+
+-- Project vertex V2
+vtx_recv{x=rx2, y=ry2, z=rz2}
+/\ project{x=rx2, y=ry2, z=rz2, sx=sx2, sy=sy2}
+/\ coord_send{sx=sx2, sy=sy2}
+
+/\
+
+-- Project vertex V3
+vtx_recv{x=rx3, y=ry3, z=rz3}
+/\ project{x=rx3, y=ry3, z=rz3, sx=sx3, sy=sy3}
+/\ coord_send{sx=sx3, sy=sy3}
+
+/\
+
+-- ============================================================
+-- VGA OUTPUT NODE: receives screen coordinates for DAC chain
+-- ============================================================
+
+node 610
+
+/\
+
+-- Receive 2D screen coordinates from projection node.
+-- In a full system, these would be relayed through wire
+-- nodes to node 117 (9-bit DAC) which drives the analog
+-- VGA signals:
+--   R, G, B channels via DAC current output (io register 0x15D)
+--   Hsync/Vsync generated by dedicated timing nodes
+--   Pixel data streamed at line rate (~25 MHz for 640x480)
+--
+-- The wireframe edges between vertices would be rasterized
+-- by a Bresenham line-drawing node inserted between the
+-- projection and output stages. Each edge connects adjacent
+-- vertices on the sphere's latitude/longitude grid.
+pixel_recv = lambda{sx:Int, sy:Int}.
+  (recv{port=0x175, value=sx} /\
+   recv{port=0x175, value=sy})
+
+/\
+
+-- Receive the 4 projected vertex positions.
+-- V0-V1 and V1-V2 form equator edges (wireframe longitude lines).
+-- V0-V3 forms a latitude edge from equator to 45 degrees north.
+pixel_recv{sx=px0, sy=py0}
+
+/\
+
+pixel_recv{sx=px1, sy=py1}
+
+/\
+
+pixel_recv{sx=px2, sy=py2}
+
+/\
+
+pixel_recv{sx=px3, sy=py3}

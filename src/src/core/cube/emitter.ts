@@ -16,6 +16,15 @@ import type { BuiltinContext, ArgInfo } from './builtins';
 import { getRomFunctions } from './rom-functions';
 import { analyzeClauses } from './clause-analysis';
 
+// ---- Source map entry: maps F18A address to CUBE source location ----
+
+export interface SourceMapEntry {
+  addr: number;
+  line: number;
+  col: number;
+  label: string;
+}
+
 // ---- Emitter context threaded through all emission functions ----
 
 interface EmitContext {
@@ -24,6 +33,7 @@ interface EmitContext {
   varMap: VariableMap;
   builtinCtx: BuiltinContext;
   warnings: CompileError[];
+  sourceMap: SourceMapEntry[];
   /** Label to jump to when the current clause/guard fails */
   failLabel?: string;
   /** Counter for generating unique labels */
@@ -40,7 +50,7 @@ export function emitCode(
   resolved: ResolvedProgram,
   plan: AllocationPlan,
   varMap: VariableMap,
-): { nodes: CompiledNode[]; warnings: CompileError[] } {
+): { nodes: CompiledNode[]; warnings: CompileError[]; sourceMap: SourceMapEntry[] } {
   const builder = new CodeBuilder(64);
   const symbols = new Map<string, number>();
 
@@ -54,6 +64,7 @@ export function emitCode(
     varMap,
     builtinCtx: { romDivmodAddr },
     warnings: [],
+    sourceMap: [],
     labelCounter: 0,
   };
 
@@ -87,6 +98,7 @@ export function emitCode(
       symbols,
     }],
     warnings: ctx.warnings,
+    sourceMap: ctx.sourceMap,
   };
 }
 
@@ -103,9 +115,23 @@ function emitConjunction(ctx: EmitContext, conjunction: Conjunction): void {
 function emitItem(ctx: EmitContext, item: ConjunctionItem): void {
   switch (item.kind) {
     case 'application':
+      if (item.functor !== '__node') {
+        ctx.sourceMap.push({
+          addr: ctx.builder.getLocationCounter(),
+          line: item.loc.line,
+          col: item.loc.col,
+          label: item.functor,
+        });
+      }
       emitApplication(ctx, item);
       break;
     case 'unification':
+      ctx.sourceMap.push({
+        addr: ctx.builder.getLocationCounter(),
+        line: item.loc.line,
+        col: item.loc.col,
+        label: `${item.variable} = ...`,
+      });
       emitUnification(ctx, item);
       break;
     case 'predicate_def':

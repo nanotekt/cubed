@@ -1,0 +1,30 @@
+\ GA144 Port Execution Example
+\ Node 609 acts as a slave memory array
+\ Node 608 stores values via port execution
+
+node 609
+: main r---
+
+node 608
+: set ( a )
+    @p ! ! ;
+    .. @p a! ..
+: @next ( -n )
+    @p ! @ ;
+    .. @+ !p ..
+: !next ( n )
+    @p ! ! ;
+    .. @p !+ ..
+: fetch ( a-n ) set @next ;
+: store ( na ) set !next ;
+
+: main
+ right a!
+
+ 0
+ 10 for
+    dup dup . +
+    over
+    store
+    1 . +
+ next
