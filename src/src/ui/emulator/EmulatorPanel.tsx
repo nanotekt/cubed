@@ -9,6 +9,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import FastForwardIcon from '@mui/icons-material/FastForward';
 import { ChipGrid } from '../chip/ChipGrid';
 import { NodeDetailPanel } from '../detail/NodeDetailPanel';
+import { VgaDisplay } from './VgaDisplay';
 import type { NodeState, NodeSnapshot } from '../../core/types';
 import type { SourceMapEntry } from '../../core/cube/emitter';
 
@@ -20,6 +21,7 @@ interface EmulatorPanelProps {
   isRunning: boolean;
   stepsPerFrame: number;
   sourceMap: SourceMapEntry[] | null;
+  ioWrites: number[];
   onNodeClick: (coord: number) => void;
   onStep: () => void;
   onStepN: (n: number) => void;
@@ -31,7 +33,7 @@ interface EmulatorPanelProps {
 
 export const EmulatorPanel: React.FC<EmulatorPanelProps> = ({
   nodeStates, nodeCoords, selectedCoord, selectedNode,
-  isRunning, stepsPerFrame, sourceMap,
+  isRunning, stepsPerFrame, sourceMap, ioWrites,
   onNodeClick, onStep, onStepN, onRun, onStop, onReset, onSetStepsPerFrame,
 }) => {
   return (
@@ -99,6 +101,11 @@ export const EmulatorPanel: React.FC<EmulatorPanelProps> = ({
             selectedCoord={selectedCoord}
             onNodeClick={onNodeClick}
           />
+          {ioWrites.length > 0 && (
+            <Box sx={{ mt: 1 }}>
+              <VgaDisplay ioWrites={ioWrites} />
+            </Box>
+          )}
         </Box>
         <Box sx={{ flex: 1, overflow: 'auto' }}>
           <NodeDetailPanel node={selectedNode} sourceMap={sourceMap} />

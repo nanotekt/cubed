@@ -390,6 +390,7 @@ export class F18ANode {
     this.IO = val;
     this.WD = ((val >> 11) & 1) === 1;
     this.notWD = !this.WD;
+    this.ga144.onIoWrite(this.coord, val);
   }
 
   // ========================================================================

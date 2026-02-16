@@ -112,6 +112,7 @@ function App() {
           <EmulatorPanel
             nodeStates={snapshot.nodeStates}
             nodeCoords={snapshot.nodeCoords}
+            ioWrites={snapshot.ioWrites}
             selectedCoord={selectedCoord}
             selectedNode={snapshot.selectedNode}
             isRunning={isRunning}
