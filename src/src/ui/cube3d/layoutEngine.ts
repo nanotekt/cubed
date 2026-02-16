@@ -226,6 +226,8 @@ const PORT_SIZE = 0.25;
 
 // ---- Main entry point ----
 
+const NODE_GROUP_SPACING_X = 5.0; // horizontal gap between node groups
+
 export function layoutAST(program: CubeProgram): SceneGraph {
   idCounter = 0;
   const nodes: SceneNode[] = [];
@@ -243,7 +245,88 @@ export function layoutAST(program: CubeProgram): SceneGraph {
     }
   }
 
-  layoutConjunction(program.conjunction, [0, 0, 0], nodes, pipes, holderPositions, holderNodeIds, undefined, constructorNames, true);
+  // Split top-level items into groups by __node directives.
+  // Items before the first __node go into an unnamed group.
+  // Each __node starts a new group with that node number as label.
+  const groups: { label: string | null; items: ConjunctionItem[] }[] = [];
+  let currentGroup: { label: string | null; items: ConjunctionItem[] } = { label: null, items: [] };
+
+  for (const item of program.conjunction.items) {
+    if (item.kind === 'application' && item.functor === '__node') {
+      // Start a new group
+      if (currentGroup.items.length > 0 || currentGroup.label !== null) {
+        groups.push(currentGroup);
+      }
+      const nodeNum = item.args[0]?.value.kind === 'literal' ? String(item.args[0].value.value) : '?';
+      currentGroup = { label: `node ${nodeNum}`, items: [] };
+    } else {
+      currentGroup.items.push(item);
+    }
+  }
+  if (currentGroup.items.length > 0 || currentGroup.label !== null) {
+    groups.push(currentGroup);
+  }
+
+  // If there's only one group (no node directives, or just one node),
+  // lay out flat as before
+  if (groups.length <= 1) {
+    const conj: Conjunction = { kind: 'conjunction', items: groups[0]?.items ?? program.conjunction.items, loc: program.conjunction.loc };
+    layoutConjunction(conj, [0, 0, 0], nodes, pipes, holderPositions, holderNodeIds, undefined, constructorNames, true);
+    return { nodes, pipes };
+  }
+
+  // Multiple node groups: lay each group along X, items within each group along Z
+  let xCursor = 0;
+  for (const group of groups) {
+    if (group.items.length === 0) continue;
+
+    const groupId = nextId('nodegroup');
+    const groupNodes: SceneNode[] = [];
+    const groupPipes: PipeInfo[] = [];
+    const conj: Conjunction = { kind: 'conjunction', items: group.items, loc: program.conjunction.loc };
+
+    layoutConjunction(conj, [xCursor, 0, 0], groupNodes, groupPipes, holderPositions, holderNodeIds, groupId, constructorNames, true);
+
+    // Compute bounding box of group nodes for the container
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const n of groupNodes) {
+      const [px, py, pz] = n.position;
+      const [sx, sy, sz] = n.size;
+      minX = Math.min(minX, px - sx / 2);
+      maxX = Math.max(maxX, px + sx / 2);
+      minY = Math.min(minY, py - sy / 2);
+      maxY = Math.max(maxY, py + sy / 2);
+      minZ = Math.min(minZ, pz - sz / 2);
+      maxZ = Math.max(maxZ, pz + sz / 2);
+    }
+
+    const pad = 0.8;
+    const gw = (maxX - minX) + pad * 2;
+    const gh = (maxY - minY) + pad * 2;
+    const gd = (maxZ - minZ) + pad * 2;
+
+    // Node group container
+    nodes.push({
+      id: groupId,
+      type: 'plane',
+      label: group.label ?? 'global',
+      position: [
+        (minX + maxX) / 2,
+        (minY + maxY) / 2,
+        (minZ + maxZ) / 2,
+      ],
+      size: [gw, gh, gd],
+      color: '#224444',
+      transparent: true,
+      opacity: 0.08,
+      ports: [],
+    });
+
+    nodes.push(...groupNodes);
+    pipes.push(...groupPipes);
+
+    xCursor += gw + NODE_GROUP_SPACING_X;
+  }
 
   return { nodes, pipes };
 }
@@ -554,14 +637,18 @@ function layoutApplication(
   const appId = nextId(isConstructor ? 'ctor' : 'app');
   const color = isConstructor ? COLORS.constructor : appColor(app.functor);
 
+  // Scale the cube height based on arg count so ports don't overlap
+  const totalRows = Math.ceil(app.args.length / 2);
+  const ARG_ROW_SPACING = 0.7; // vertical space per arg row
+  const appHeight = Math.max(APP_SIZE, totalRows * ARG_ROW_SPACING);
+
   // Build ports from args
   const ports: PortInfo[] = app.args.map((arg, i) => {
     const side: 'left' | 'right' = i % 2 === 0 ? 'right' : 'left';
     const row = Math.floor(i / 2);
-    const totalRows = Math.ceil(app.args.length / 2);
     const frac = totalRows > 1 ? row / (totalRows - 1) : 0.5;
     const xOff = side === 'right' ? APP_SIZE / 2 + PORT_SIZE : -APP_SIZE / 2 - PORT_SIZE;
-    const yOff = (0.5 - frac) * APP_SIZE * 0.8;
+    const yOff = (0.5 - frac) * (appHeight - ARG_ROW_SPACING * 0.5);
     const portPos: [number, number, number] = [
       pos[0] + xOff,
       pos[1] + yOff,
@@ -581,7 +668,7 @@ function layoutApplication(
     type: isConstructor ? 'constructor' : 'application',
     label: app.functor,
     position: pos,
-    size: [APP_SIZE, APP_SIZE, APP_SIZE],
+    size: [APP_SIZE, appHeight, APP_SIZE],
     color,
     transparent: false,
     opacity: 1,
