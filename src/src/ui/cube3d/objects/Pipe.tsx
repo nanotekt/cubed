@@ -17,10 +17,34 @@ export function Pipe({ pipe, highlighted, onHover }: PipeProps) {
     mid.y += 0.3;
 
     const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
-    return new THREE.TubeGeometry(curve, 16, highlighted ? 0.07 : 0.04, 8, false);
-  }, [pipe.from, pipe.to, highlighted]);
+    const tubularSegments = 16;
+    const geo = new THREE.TubeGeometry(curve, tubularSegments, highlighted ? 0.07 : 0.04, 8, false);
 
-  const color = highlighted ? '#ffffff' : pipe.color;
+    // Apply vertex color gradient from fromColor to toColor
+    if (!highlighted) {
+      const fromCol = new THREE.Color(pipe.fromColor);
+      const toCol = new THREE.Color(pipe.toColor);
+      const positions = geo.attributes.position;
+      const colors = new Float32Array(positions.count * 3);
+      const tmpColor = new THREE.Color();
+
+      const radialSegments = 8;
+      const vertsPerRing = radialSegments + 1;
+
+      for (let i = 0; i < positions.count; i++) {
+        const ringIndex = Math.floor(i / vertsPerRing);
+        const t = ringIndex / tubularSegments;
+        tmpColor.copy(fromCol).lerp(toCol, t);
+        colors[i * 3] = tmpColor.r;
+        colors[i * 3 + 1] = tmpColor.g;
+        colors[i * 3 + 2] = tmpColor.b;
+      }
+
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    }
+
+    return geo;
+  }, [pipe.from, pipe.to, pipe.fromColor, pipe.toColor, highlighted]);
 
   return (
     <mesh
@@ -29,14 +53,27 @@ export function Pipe({ pipe, highlighted, onHover }: PipeProps) {
       onPointerOver={(e) => { e.stopPropagation(); onHover(pipe.id); }}
       onPointerOut={() => onHover(null)}
     >
-      <meshStandardMaterial
-        color={color}
-        transparent
-        opacity={highlighted ? 1 : 0.7}
-        depthWrite={false}
-        emissive={color}
-        emissiveIntensity={highlighted ? 0.8 : 0.3}
-      />
+      {highlighted ? (
+        <meshStandardMaterial
+          key="highlighted"
+          color="#ffffff"
+          transparent
+          opacity={1}
+          depthWrite={false}
+          emissive="#ffffff"
+          emissiveIntensity={0.8}
+        />
+      ) : (
+        <meshStandardMaterial
+          key="normal"
+          vertexColors
+          transparent
+          opacity={0.7}
+          depthWrite={false}
+          emissive="#444444"
+          emissiveIntensity={0.3}
+        />
+      )}
     </mesh>
   );
 }

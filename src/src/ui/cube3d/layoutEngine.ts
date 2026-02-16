@@ -49,7 +49,9 @@ export interface PipeInfo {
   id: string;
   from: [number, number, number];
   to: [number, number, number];
-  color: string;
+  color: string;       // primary color (used for uniform fallback)
+  fromColor: string;   // color at the 'from' end
+  toColor: string;     // color at the 'to' end
   fromNodeId?: string;
   toNodeId?: string;
 }
@@ -69,7 +71,10 @@ const COLORS = {
   definition: '#22aa66',
   holder: '#66aadd',
   literal: '#ddaa44',
-  pipe: '#44dddd',
+  pipe: '#44dddd',          // default / bidirectional
+  pipe_source: '#44dd88',  // data flowing INTO a builtin (green-ish)
+  pipe_sink: '#dd6644',    // data flowing OUT of a builtin (orange-ish)
+  pipe_bidi: '#44dddd',    // bidirectional / unification (cyan)
   plane: '#335533',
   constructor: '#cc44aa',
   type_def: '#aa66cc',
@@ -90,6 +95,53 @@ function appColor(functor: string): string {
   if (functor.startsWith('rom.')) return COLORS.rom;
   if (functor === '__node') return COLORS.unknown;
   return COLORS.user;
+}
+
+// ---- Pipe direction (source / sink / bidi) ----
+
+type PipeDirection = 'source' | 'sink' | 'bidi';
+
+/** Determine whether a builtin arg at a given index is an input (source),
+ *  output (sink), or bidirectional. Convention:
+ *  - 3-arg builtins (plus, band, ...): args 0,1 = source, arg 2 = sink
+ *  - bnot: arg 0 = source, arg 1 = sink
+ *  - greater, equal: all source (comparison, no output)
+ *  - not: bidi (logical negation)
+ *  - send: arg 0 (port) = source, arg 1 (value) = source
+ *  - recv: arg 0 (port) = source, arg 1 (value) = sink
+ *  - shl, shr: args 0,1 = source, arg 2 = sink
+ *  - user-defined / unknown: bidi
+ */
+function argDirection(functor: string, argIndex: number): PipeDirection {
+  switch (functor) {
+    case 'plus': case 'minus': case 'times':
+    case 'band': case 'bor': case 'bxor':
+    case 'shl': case 'shr':
+      return argIndex < 2 ? 'source' : 'sink';
+    case 'bnot':
+      return argIndex === 0 ? 'source' : 'sink';
+    case 'greater': case 'equal':
+    case 'send':
+      return 'source';
+    case 'recv':
+      return argIndex === 0 ? 'source' : 'sink';
+    case 'not':
+      return 'bidi';
+    default:
+      return 'bidi';
+  }
+}
+
+/** Returns [appEndColor, termEndColor] for a pipe connecting an app port to a term.
+ *  - source arg: data flows FROM term TO app → term=producer(green), app=consumer(orange)
+ *  - sink arg:   data flows FROM app TO term → app=producer(green), term=consumer(orange)
+ *  - bidi:       both ends cyan */
+function pipeColorsForDirection(dir: PipeDirection): [string, string] {
+  switch (dir) {
+    case 'source': return [COLORS.pipe_sink, COLORS.pipe_source];   // app consumes, term produces
+    case 'sink':   return [COLORS.pipe_source, COLORS.pipe_sink];   // app produces, term consumes
+    case 'bidi':   return [COLORS.pipe_bidi, COLORS.pipe_bidi];
+  }
 }
 
 // ---- ID generation ----
@@ -542,7 +594,9 @@ function layoutApplication(
   for (let i = 0; i < app.args.length; i++) {
     const arg = app.args[i];
     const port = ports[i];
-    layoutTermForPort(arg.value, port, appId, pos, nodes, pipes, holderPositions, holderNodeIds, appId, constructorNames);
+    const dir = argDirection(app.functor, i);
+    const [appEndColor, termEndColor] = pipeColorsForDirection(dir);
+    layoutTermForPort(arg.value, port, appId, pos, nodes, pipes, holderPositions, holderNodeIds, appId, constructorNames, appEndColor, termEndColor);
   }
 
   return { width: APP_SIZE, depth: APP_SIZE };
@@ -584,12 +638,14 @@ function layoutUnification(
   const termPos: [number, number, number] = [pos[0] + 1.5, pos[1], pos[2]];
   const termNodeId = layoutTerm(uni.term, termPos, nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
 
-  // Pipe from holder to term
+  // Pipe from holder to term (unification = bidirectional)
   pipes.push({
     id: nextId('pipe'),
     from: holderPos,
     to: termPos,
-    color: COLORS.pipe,
+    color: COLORS.pipe_bidi,
+    fromColor: COLORS.pipe_bidi,
+    toColor: COLORS.pipe_bidi,
     fromNodeId: holderId,
     toNodeId: termNodeId ?? undefined,
   });
@@ -633,7 +689,7 @@ function layoutTerm(
       if (existing) {
         // Pipe to existing holder
         const existingNodeId = holderNodeIds.get(term.name);
-        pipes.push({ id: nextId('pipe'), from: pos, to: existing, color: COLORS.pipe, toNodeId: existingNodeId });
+        pipes.push({ id: nextId('pipe'), from: pos, to: existing, color: COLORS.pipe_bidi, fromColor: COLORS.pipe_bidi, toColor: COLORS.pipe_bidi, toNodeId: existingNodeId });
         return existingNodeId ?? null;
       }
       // New holder
@@ -700,6 +756,8 @@ function layoutTermForPort(
   holderNodeIds: Map<string, string>,
   parentId?: string,
   constructorNames?: Set<string>,
+  appEndColor: string = COLORS.pipe_bidi,
+  termEndColor: string = COLORS.pipe_bidi,
 ): void {
   const offset = port.side === 'right' ? 1.2 : -1.2;
   const termPos: [number, number, number] = [
@@ -725,14 +783,14 @@ function layoutTermForPort(
           parentId,
           ports: [],
         });
-        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: ctorId });
+        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: appEndColor, fromColor: appEndColor, toColor: termEndColor, fromNodeId: appNodeId, toNodeId: ctorId });
         break;
       }
       const existing = holderPositions.get(term.name);
       if (existing) {
         // Pipe from port to existing holder
         const existingNodeId = holderNodeIds.get(term.name);
-        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: existing, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: existingNodeId });
+        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: existing, color: appEndColor, fromColor: appEndColor, toColor: termEndColor, fromNodeId: appNodeId, toNodeId: existingNodeId });
       } else {
         // New holder
         const holderId = nextId('holder');
@@ -750,7 +808,7 @@ function layoutTermForPort(
         });
         holderPositions.set(term.name, termPos);
         holderNodeIds.set(term.name, holderId);
-        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: holderId });
+        pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: appEndColor, fromColor: appEndColor, toColor: termEndColor, fromNodeId: appNodeId, toNodeId: holderId });
       }
       break;
     }
@@ -768,7 +826,7 @@ function layoutTermForPort(
         parentId,
         ports: [],
       });
-      pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: litId });
+      pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: appEndColor, fromColor: appEndColor, toColor: termEndColor, fromNodeId: appNodeId, toNodeId: litId });
       break;
     }
     case 'app_term': {
@@ -780,7 +838,7 @@ function layoutTermForPort(
       };
       layoutApplication(inlineApp, termPos, nodes, pipes, holderPositions, holderNodeIds, parentId, constructorNames);
       const inlineAppNodeId = nodes[nodes.length - 1]?.id;
-      pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: COLORS.pipe, fromNodeId: appNodeId, toNodeId: inlineAppNodeId });
+      pipes.push({ id: nextId('pipe'), from: port.worldPos, to: termPos, color: appEndColor, fromColor: appEndColor, toColor: termEndColor, fromNodeId: appNodeId, toNodeId: inlineAppNodeId });
       break;
     }
     case 'rename':
