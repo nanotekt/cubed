@@ -1,0 +1,60 @@
+-- Fibonacci Sequence (from test-print.aforth)
+-- Single-node iterative Fibonacci computation.
+--
+-- In the reference, node 0 computes Fib values using
+-- the over-over-add pattern on the F18A stack.
+-- Here we model each step as explicit dataflow.
+
+node 0
+
+/\
+
+-- One Fibonacci step: given F(n-1) and F(n-2), produce F(n)
+fib_step = lambda{a:Int, b:Int, next:Int}.
+  plus{a=a, b=b, c=next}
+
+/\
+
+-- Unroll 10 iterations of the Fibonacci sequence
+-- F(0)=1, F(1)=1
+fib_step{a=1, b=1, next=f2}
+
+/\
+
+-- F(3) = F(2) + F(1)
+fib_step{a=1, b=f2, next=f3}
+
+/\
+
+-- F(4) = F(3) + F(2)
+fib_step{a=f2, b=f3, next=f4}
+
+/\
+
+-- F(5) = F(4) + F(3)
+fib_step{a=f3, b=f4, next=f5}
+
+/\
+
+-- F(6) = F(5) + F(4)
+fib_step{a=f4, b=f5, next=f6}
+
+/\
+
+-- F(7) = F(6) + F(5)
+fib_step{a=f5, b=f6, next=f7}
+
+/\
+
+-- F(8) = F(7) + F(6)
+fib_step{a=f6, b=f7, next=f8}
+
+/\
+
+-- F(9) = F(8) + F(7)
+fib_step{a=f7, b=f8, next=f9}
+
+/\
+
+-- F(10) = F(9) + F(8)
+fib_step{a=f8, b=f9, next=f10}

@@ -5,13 +5,23 @@
 import { tokenizeCube } from './tokenizer';
 import { parseCube } from './parser';
 import { resolve } from './resolver';
+import type { ResolvedSymbol } from './resolver';
 import { typeCheck } from './typechecker';
 import { allocateNodes } from './allocator';
 import { mapVariables } from './varmapper';
+import type { VariableMap } from './varmapper';
 import { emitCode } from './emitter';
+import type { SourceMapEntry } from './emitter';
 import type { CompiledProgram } from '../types';
 
-export function compileCube(source: string): CompiledProgram {
+export interface CubeCompileResult extends CompiledProgram {
+  symbols?: Map<string, ResolvedSymbol>;
+  variables?: VariableMap;
+  sourceMap?: SourceMapEntry[];
+  nodeCoord?: number;
+}
+
+export function compileCube(source: string): CubeCompileResult {
   // Tokenize
   const { tokens, errors: tokenErrors } = tokenizeCube(source);
   if (tokenErrors.length > 0) {
@@ -43,7 +53,14 @@ export function compileCube(source: string): CompiledProgram {
   const varMap = mapVariables(resolved.variables);
 
   // Emit code
-  const { nodes, warnings } = emitCode(resolved, plan, varMap);
+  const { nodes, warnings, sourceMap } = emitCode(resolved, plan, varMap);
 
-  return { nodes, errors: warnings };
+  return {
+    nodes,
+    errors: warnings,
+    symbols: resolved.symbols,
+    variables: varMap,
+    sourceMap,
+    nodeCoord: plan.nodeCoord,
+  };
 }

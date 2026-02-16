@@ -1,34 +1,21 @@
 import React from 'react';
 import {
-  Box, Button, ButtonGroup, Slider, Typography, Chip, ToggleButtonGroup, ToggleButton,
+  Box, Button, Chip, ToggleButtonGroup, ToggleButton,
 } from '@mui/material';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import PauseIcon from '@mui/icons-material/Pause';
-import SkipNextIcon from '@mui/icons-material/SkipNext';
-import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import BuildIcon from '@mui/icons-material/Build';
-import FastForwardIcon from '@mui/icons-material/FastForward';
 import type { EditorLanguage } from '../editor/CodeEditor';
 
 interface DebugToolbarProps {
-  isRunning: boolean;
   activeCount: number;
   totalSteps: number;
-  stepsPerFrame: number;
   language: EditorLanguage;
-  onStep: () => void;
-  onStepN: (n: number) => void;
-  onRun: () => void;
-  onStop: () => void;
-  onReset: () => void;
   onCompile: () => void;
-  onSetStepsPerFrame: (n: number) => void;
   onSetLanguage: (lang: EditorLanguage) => void;
 }
 
 export const DebugToolbar: React.FC<DebugToolbarProps> = ({
-  isRunning, activeCount, totalSteps, stepsPerFrame, language,
-  onStep, onStepN, onRun, onStop, onReset, onCompile, onSetStepsPerFrame, onSetLanguage,
+  activeCount, totalSteps, language,
+  onCompile, onSetLanguage,
 }) => {
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1, height: 40 }}>
@@ -57,42 +44,6 @@ export const DebugToolbar: React.FC<DebugToolbarProps> = ({
       >
         Compile
       </Button>
-
-      <ButtonGroup size="small" variant="outlined">
-        <Button onClick={onStep} disabled={isRunning} title="Step (F10)">
-          <SkipNextIcon fontSize="small" />
-        </Button>
-        <Button onClick={() => onStepN(100)} disabled={isRunning} title="Step 100">
-          <FastForwardIcon fontSize="small" />
-        </Button>
-        {isRunning ? (
-          <Button onClick={onStop} color="warning" title="Stop (Esc)">
-            <PauseIcon fontSize="small" />
-          </Button>
-        ) : (
-          <Button onClick={onRun} color="success" title="Run (F5)">
-            <PlayArrowIcon fontSize="small" />
-          </Button>
-        )}
-        <Button onClick={onReset} color="error" title="Reset">
-          <RestartAltIcon fontSize="small" />
-        </Button>
-      </ButtonGroup>
-
-      <Box sx={{ width: 120, ml: 1 }}>
-        <Typography variant="caption" sx={{ color: '#888', fontSize: '9px' }}>
-          Steps/frame: {stepsPerFrame}
-        </Typography>
-        <Slider
-          size="small"
-          value={stepsPerFrame}
-          onChange={(_, v) => onSetStepsPerFrame(v as number)}
-          min={1}
-          max={1000}
-          step={1}
-          sx={{ py: 0 }}
-        />
-      </Box>
 
       <Box sx={{ ml: 'auto', display: 'flex', gap: 1 }}>
         <Chip

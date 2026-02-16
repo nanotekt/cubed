@@ -1,0 +1,47 @@
+-- Blue Rectangle on Green Background (VGA Output)
+-- Renders a blue rectangle centered on a green background
+-- using the GA144's 9-bit DAC on node 117 for VGA output.
+--
+-- 9-bit DAC format: bits [8:6]=R, [5:3]=G, [2:0]=B
+--   Green: R=0, G=7, B=0 -> 0b000_111_000 = 56
+--   Blue:  R=0, G=0, B=7 -> 0b000_000_111 = 7
+--
+-- Simplified 4x4 grid: rows of green (G) and blue (B):
+--   Row 0: G G G G   (all green)
+--   Row 1: G B B G   (blue center)
+--   Row 2: G B B G   (blue center)
+--   Row 3: G G G G   (all green)
+
+node 117
+
+/\
+
+-- Send green pixel to IO port
+green = lambda{}.
+  send{port=0x15D, value=56}
+
+/\
+
+-- Send blue pixel to IO port
+blue = lambda{}.
+  send{port=0x15D, value=7}
+
+/\
+
+-- Row 0: all green
+green{} /\ green{} /\ green{} /\ green{}
+
+/\
+
+-- Row 1: green-blue-blue-green
+green{} /\ blue{} /\ blue{} /\ green{}
+
+/\
+
+-- Row 2: green-blue-blue-green
+green{} /\ blue{} /\ blue{} /\ green{}
+
+/\
+
+-- Row 3: all green
+green{} /\ green{} /\ green{} /\ green{}

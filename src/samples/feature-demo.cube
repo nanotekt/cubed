@@ -1,0 +1,90 @@
+-- CUBE Language Feature Demonstration
+-- Showcases: type definitions, constructors, pattern matching,
+-- multi-clause predicates, multidirectional builtins, guards,
+-- and Hindley-Milner type inference.
+
+-- ============================================================
+-- 1. TYPE DEFINITIONS
+-- ============================================================
+
+-- Bool: a sum type with two nullary constructors.
+-- Compiler assigns tag 0 to 'true', tag 1 to 'false'.
+Bool = Lambda{}. true + false
+
+/\
+
+-- Pair: a product type with two Int fields.
+-- Fields stored in RAM; descriptor encodes base address.
+Pair = Lambda{}. pair{fst: Int, snd: Int}
+
+/\
+
+-- ============================================================
+-- 2. MULTI-CLAUSE with CONSTRUCTOR MATCHING
+-- ============================================================
+
+-- bool_to_int: converts Bool -> Int via pattern matching.
+-- Each clause discriminates on the constructor tag.
+bool_to_int = lambda{b:Bool, n:Int}.
+  (b = true /\ n = 1
+   \/
+   b = false /\ n = 0)
+
+/\
+
+-- ============================================================
+-- 3. MULTI-CLAUSE with LITERAL MATCHING + GUARDS
+-- ============================================================
+
+-- Factorial: base case (n=0) and recursive case with guard.
+-- Uses multidirectional 'times' (forward: c = a * b).
+fact = lambda{n:Int, r:Int}.
+  (n = 0 /\ r = 1
+   \/
+   greater{a=n, b=0} /\
+   minus{a=n, b=1, c=n1} /\
+   fact{n=n1, r=r1} /\
+   times{a=n, b=r1, c=r})
+
+/\
+
+-- ============================================================
+-- 4. MULTIDIRECTIONAL BUILTINS (reverse mode)
+-- ============================================================
+
+-- Reverse-mode plus: given c=10 and b=3, solve for a.
+-- Compiler generates: a = c - b = 7
+plus{a=x, b=3, c=10}
+
+/\
+
+-- Reverse-mode minus: given a=20 and c=15, solve for b.
+-- Compiler generates: b = a - c = 5
+minus{a=20, b=y, c=15}
+
+/\
+
+-- ============================================================
+-- 5. CONSTRUCTOR APPLICATION + PATTERN MATCHING
+-- ============================================================
+
+-- Build a Bool, convert it to Int, then make a Pair
+myval = true
+
+/\
+
+bool_to_int{b=myval, n=intval}
+
+/\
+
+p = pair{fst=intval, snd=42}
+
+/\
+
+-- ============================================================
+-- 6. EQUALITY CHECK (both args known -> check mode)
+-- ============================================================
+
+-- Verifies intval == 1 (since myval = true -> intval = 1).
+-- Emits XOR + conditional branch; halts on mismatch.
+equal{a=intval, b=1}

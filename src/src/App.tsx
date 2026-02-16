@@ -1,13 +1,14 @@
-import { useRef, useCallback } from 'react';
-import { ThemeProvider, CssBaseline } from '@mui/material';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { ThemeProvider, CssBaseline, Box } from '@mui/material';
 import { theme } from './ui/theme';
 import { MainLayout } from './ui/layout/MainLayout';
-import { ChipGrid } from './ui/chip/ChipGrid';
-import { NodeDetailPanel } from './ui/detail/NodeDetailPanel';
 import { CodeEditor } from './ui/editor/CodeEditor';
 import { DebugToolbar } from './ui/toolbar/DebugToolbar';
 import { CubeRenderer } from './ui/cube3d/CubeRenderer';
+import { EmulatorPanel } from './ui/emulator/EmulatorPanel';
+import { CompileOutputPanel } from './ui/output/CompileOutputPanel';
 import { useEmulator } from './hooks/useEmulator';
+import { readUrlSource, updateUrlSource } from './ui/urlSource';
 
 function App() {
   const {
@@ -18,6 +19,8 @@ function App() {
     stepsPerFrame,
     language,
     cubeAst,
+    cubeCompileResult,
+    compiledProgram,
     step,
     stepN,
     run,
@@ -29,7 +32,20 @@ function App() {
     setLanguage,
   } = useEmulator();
 
+  const [activeTab, setActiveTab] = useState(0);
+  const [urlSource, setUrlSource] = useState<string | null>(null);
   const editorSourceRef = useRef<string>('');
+
+  // Load source from URL ?src= on mount
+  useEffect(() => {
+    readUrlSource().then(source => {
+      if (source) {
+        setUrlSource(source);
+        editorSourceRef.current = source;
+        compileAndLoad(source);
+      }
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSourceChange = useCallback((source: string) => {
     editorSourceRef.current = source;
@@ -38,56 +54,84 @@ function App() {
   const handleCompileFromEditor = useCallback((source: string) => {
     editorSourceRef.current = source;
     compileAndLoad(source);
+    updateUrlSource(source);
   }, [compileAndLoad]);
 
   const handleCompileButton = useCallback(() => {
     if (editorSourceRef.current) {
       compileAndLoad(editorSourceRef.current);
+      updateUrlSource(editorSourceRef.current);
     }
   }, [compileAndLoad]);
 
   if (!snapshot) return null;
 
+  const sourceMap = cubeCompileResult?.sourceMap ?? null;
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <MainLayout
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
         toolbar={
           <DebugToolbar
-            isRunning={isRunning}
             activeCount={snapshot.activeCount}
             totalSteps={snapshot.totalSteps}
-            stepsPerFrame={stepsPerFrame}
             language={language}
+            onCompile={handleCompileButton}
+            onSetLanguage={setLanguage}
+          />
+        }
+        editorTab={
+          <>
+            {/* Left: CUBE 3D renderer (only in CUBE mode) */}
+            {language === 'cube' && (
+              <Box sx={{
+                width: 510,
+                flexShrink: 0,
+                overflow: 'hidden',
+                borderRight: '1px solid #333',
+              }}>
+                <CubeRenderer ast={cubeAst} />
+              </Box>
+            )}
+            {/* Center: Code editor */}
+            <Box sx={{ flex: 1, overflow: 'hidden' }}>
+              <CodeEditor
+                language={language}
+                onCompile={handleCompileFromEditor}
+                onSourceChange={handleSourceChange}
+                errors={compileErrors}
+                initialSource={urlSource}
+              />
+            </Box>
+          </>
+        }
+        emulatorTab={
+          <EmulatorPanel
+            nodeStates={snapshot.nodeStates}
+            nodeCoords={snapshot.nodeCoords}
+            selectedCoord={selectedCoord}
+            selectedNode={snapshot.selectedNode}
+            isRunning={isRunning}
+            stepsPerFrame={stepsPerFrame}
+            sourceMap={sourceMap}
+            onNodeClick={selectNode}
             onStep={step}
             onStepN={stepN}
             onRun={run}
             onStop={stop}
             onReset={reset}
-            onCompile={handleCompileButton}
             onSetStepsPerFrame={setStepsPerFrame}
-            onSetLanguage={setLanguage}
           />
         }
-        chipGrid={
-          <ChipGrid
-            nodeStates={snapshot.nodeStates}
-            nodeCoords={snapshot.nodeCoords}
-            selectedCoord={selectedCoord}
-            onNodeClick={selectNode}
-          />
-        }
-        cubeRenderer={language === 'cube' ? <CubeRenderer ast={cubeAst} /> : undefined}
-        editor={
-          <CodeEditor
+        outputTab={
+          <CompileOutputPanel
+            cubeResult={cubeCompileResult}
+            compiledProgram={compiledProgram}
             language={language}
-            onCompile={handleCompileFromEditor}
-            onSourceChange={handleSourceChange}
-            errors={compileErrors}
           />
-        }
-        detailPanel={
-          <NodeDetailPanel node={snapshot.selectedNode} />
         }
       />
     </ThemeProvider>

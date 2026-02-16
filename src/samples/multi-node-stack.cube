@@ -1,0 +1,48 @@
+-- Multi-Node Stack (from stack.aforth)
+-- Two-node distributed stack: node 1 stores values in RAM,
+-- node 0 sends push/pop commands via port communication.
+--
+-- In the reference, node 1 uses its 64-word RAM as a stack
+-- with address auto-decrement. Node 0 issues push/pop
+-- commands through the east/west port boundary.
+--
+-- This models the logical data flow of push and pop
+-- operations between client and storage nodes.
+
+node 0
+
+/\
+
+-- Operation type for stack commands
+StackOp = Lambda{}. push_op + pop_op
+
+/\
+
+-- Push: send value to storage node via east port (0x1D5)
+stack_push = lambda{val:Int}.
+  send{port=0x1D5, value=val}
+
+/\
+
+-- Pop: receive value from storage node via east port
+stack_pop = lambda{val:Int}.
+  recv{port=0x1D5, value=val}
+
+/\
+
+-- Push three values: 1, 2, 3
+stack_push{val=1}
+/\ stack_push{val=2}
+/\ stack_push{val=3}
+
+/\
+
+-- Pop three values (should come back as 3, 2, 1)
+stack_pop{val=v1}
+/\ stack_pop{val=v2}
+/\ stack_pop{val=v3}
+
+/\
+
+-- Push one more
+stack_push{val=5}
