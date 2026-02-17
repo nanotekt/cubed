@@ -74,10 +74,7 @@ function App() {
       <CssBaseline />
       <MainLayout
         activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          if (tab === 0) setLanguage('recurse');
-        }}
+        onTabChange={setActiveTab}
         toolbar={
           <DebugToolbar
             activeCount={snapshot.activeCount}
@@ -86,41 +83,41 @@ function App() {
             onCompile={handleCompileButton}
             onSetLanguage={(lang) => {
               setLanguage(lang);
-              setActiveTab(lang === 'recurse' ? 0 : 1);
+              if (lang === 'recurse') setActiveTab(0);
             }}
           />
         }
         editorTab={
-          <>
-            {/* Left: CUBE 3D renderer (only in CUBE mode) */}
-            {language === 'cube' && (
-              <Box sx={{
-                width: 510,
-                flexShrink: 0,
-                overflow: 'hidden',
-                borderRight: '1px solid #333',
-              }}>
-                <CubeRenderer ast={cubeAst} />
+          language === 'recurse' ? (
+            <RecursePanel />
+          ) : (
+            <>
+              {language === 'cube' && (
+                <Box sx={{
+                  width: 510,
+                  flexShrink: 0,
+                  overflow: 'hidden',
+                  borderRight: '1px solid #333',
+                }}>
+                  <CubeRenderer ast={cubeAst} />
+                </Box>
+              )}
+              <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                <CodeEditor
+                  language={language}
+                  onCompile={handleCompileFromEditor}
+                  onSourceChange={handleSourceChange}
+                  errors={compileErrors}
+                  initialSource={urlSource}
+                />
               </Box>
-            )}
-            {/* Center: Code editor */}
-            <Box sx={{ flex: 1, overflow: 'hidden' }}>
-              <CodeEditor
-                language={language}
-                onCompile={handleCompileFromEditor}
-                onSourceChange={handleSourceChange}
-                errors={compileErrors}
-                initialSource={urlSource}
-              />
-            </Box>
-          </>
+            </>
+          )
         }
         emulatorTab={
           <EmulatorPanel
             nodeStates={snapshot.nodeStates}
             nodeCoords={snapshot.nodeCoords}
-            ioWrites={snapshot.ioWrites}
-            ioWriteCount={snapshot.ioWriteCount}
             selectedCoord={selectedCoord}
             selectedNode={snapshot.selectedNode}
             isRunning={isRunning}
@@ -140,9 +137,10 @@ function App() {
             cubeResult={cubeCompileResult}
             compiledProgram={compiledProgram}
             language={language}
+            ioWrites={snapshot.ioWrites}
+            ioWriteCount={snapshot.ioWriteCount}
           />
         }
-        recurseTab={<RecursePanel />}
       />
     </ThemeProvider>
   );

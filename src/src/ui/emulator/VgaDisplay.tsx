@@ -35,7 +35,6 @@ export const VgaDisplay: React.FC<VgaDisplayProps> = ({ ioWrites, ioWriteCount }
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastDrawnRef = useRef(0);
   const cursorRef = useRef({ x: 0, y: 0 });
-  const prevDimsRef = useRef({ w: 0, h: 0 });
   const [pixelScale, setPixelScale] = useState(0);
   const [manualWidth, setManualWidth] = useState(4);
 
@@ -64,16 +63,17 @@ export const VgaDisplay: React.FC<VgaDisplayProps> = ({ ioWrites, ioWriteCount }
     const hasSyncSignals = resolution.hasSyncSignals;
     const w = displayWidth;
 
-    // Detect if we need a full redraw (dimensions changed, buffer reset, or first draw)
+    // Only resize canvas when dimensions actually grow — avoids clearing
+    const needsResize = canvas.width < canvasWidth || canvas.height < canvasHeight;
     const needsFullRedraw =
-      ioWriteCount < lastDrawnRef.current ||  // buffer was reset
-      canvasWidth !== prevDimsRef.current.w ||
-      canvasHeight !== prevDimsRef.current.h;
+      needsResize ||
+      ioWriteCount < lastDrawnRef.current; // buffer was reset
 
-    // Update canvas DOM dimensions if needed (this clears the canvas)
-    if (canvas.width !== canvasWidth) canvas.width = canvasWidth;
-    if (canvas.height !== canvasHeight) canvas.height = canvasHeight;
-    prevDimsRef.current = { w: canvasWidth, h: canvasHeight };
+    if (needsResize) {
+      // Grow canvas to fit (never shrink — avoids unnecessary clears)
+      canvas.width = Math.max(canvas.width, canvasWidth);
+      canvas.height = Math.max(canvas.height, canvasHeight);
+    }
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -83,7 +83,7 @@ export const VgaDisplay: React.FC<VgaDisplayProps> = ({ ioWrites, ioWriteCount }
 
     if (needsFullRedraw) {
       ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       cursor.x = 0;
       cursor.y = 0;
       startIdx = 0;
@@ -107,9 +107,9 @@ export const VgaDisplay: React.FC<VgaDisplayProps> = ({ ioWrites, ioWriteCount }
     lastDrawnRef.current = ioWriteCount;
   }, [ioWriteCount, effectiveScale, resolution.hasSyncSignals, displayWidth, canvasWidth, canvasHeight, ioWrites]);
 
-  // Full redraw when user changes scale/width settings
+  // Force full redraw when user changes scale/width settings
   useEffect(() => {
-    prevDimsRef.current = { w: 0, h: 0 }; // force full redraw on next render
+    lastDrawnRef.current = 0;
   }, [effectiveScale, manualWidth]);
 
   let totalPixels = ioWriteCount;
@@ -161,9 +161,13 @@ export const VgaDisplay: React.FC<VgaDisplayProps> = ({ ioWrites, ioWriteCount }
         <Box sx={{ overflow: 'auto', maxHeight: 520, p: 0.5 }}>
           <canvas
             ref={canvasRef}
-            width={canvasWidth}
-            height={canvasHeight}
-            style={{ display: 'block', backgroundColor: '#000', imageRendering: 'pixelated' }}
+            style={{
+              display: 'block',
+              width: canvasWidth,
+              height: canvasHeight,
+              backgroundColor: '#000',
+              imageRendering: 'pixelated',
+            }}
           />
         </Box>
       ) : (
