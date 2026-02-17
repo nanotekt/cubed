@@ -80,11 +80,19 @@ function App() {
             activeCount={snapshot.activeCount}
             totalSteps={snapshot.totalSteps}
             language={language}
+            isRunning={isRunning}
+            stepsPerFrame={stepsPerFrame}
             onCompile={handleCompileButton}
             onSetLanguage={(lang) => {
               setLanguage(lang);
               if (lang === 'recurse') setActiveTab(0);
             }}
+            onStep={step}
+            onStepN={stepN}
+            onRun={run}
+            onStop={stop}
+            onReset={reset}
+            onSetStepsPerFrame={setStepsPerFrame}
           />
         }
         editorTab={
@@ -120,16 +128,8 @@ function App() {
             nodeCoords={snapshot.nodeCoords}
             selectedCoord={selectedCoord}
             selectedNode={snapshot.selectedNode}
-            isRunning={isRunning}
-            stepsPerFrame={stepsPerFrame}
             sourceMap={sourceMap}
             onNodeClick={selectNode}
-            onStep={step}
-            onStepN={stepN}
-            onRun={run}
-            onStop={stop}
-            onReset={reset}
-            onSetStepsPerFrame={setStepsPerFrame}
           />
         }
         outputTab={
