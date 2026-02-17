@@ -6,13 +6,14 @@ import {
 import type { CubeCompileResult } from '../../core/cube/compiler';
 import type { CompiledProgram, CompiledNode } from '../../core/types';
 import type { SourceMapEntry } from '../../core/cube/emitter';
+import type { EditorLanguage } from '../editor/CodeEditor';
 import { OPCODES } from '../../core/constants';
 import { XOR_ENCODING } from '../../core/types';
 
 interface CompileOutputPanelProps {
   cubeResult: CubeCompileResult | null;
   compiledProgram: CompiledProgram | null;
-  language: 'cube' | 'arrayforth';
+  language: EditorLanguage;
 }
 
 const cellSx = { fontSize: '11px', py: 0.5, px: 1, fontFamily: 'monospace' };
@@ -20,6 +21,16 @@ const headerSx = { ...cellSx, fontWeight: 'bold', color: '#aaa' };
 
 export const CompileOutputPanel: React.FC<CompileOutputPanelProps> = ({ cubeResult, compiledProgram, language }) => {
   const [tab, setTab] = React.useState(0);
+
+  if (language === 'recurse') {
+    return (
+      <Paper elevation={2} sx={{ p: 2, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Typography variant="body2" sx={{ color: '#666' }}>
+          Recurse mode has no compile output
+        </Typography>
+      </Paper>
+    );
+  }
 
   if (language === 'cube') {
     return <CubeOutputView result={cubeResult} tab={tab} setTab={setTab} />;

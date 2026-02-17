@@ -210,9 +210,9 @@ function parseArgs(expr: string, openIdx: number): { args: string[]; end: number
 function callFunc(
   name: string,
   args: string[],
-  source: string,
-  outputSoFar: string,
-  depth: number,
+  _source: string,
+  _outputSoFar: string,
+  _depth: number,
 ): string {
   switch (name) {
     case 'repeat': {
