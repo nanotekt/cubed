@@ -134,10 +134,6 @@ function fillNoise(data: Uint8Array) {
   }
 }
 
-function clearBlack(data: Uint8Array) {
-  data.fill(0);
-  for (let i = 3; i < data.length; i += 4) data[i] = 255;
-}
 
 // ---- Component ----
 
@@ -242,29 +238,16 @@ export const VgaDisplay: React.FC<VgaDisplayProps> = ({ ioWrites, ioWriteCount }
     if (!glStateRef.current || ioWriteCount === 0) return;
 
     const hasSyncSignals = resolution.hasSyncSignals;
-    const w = displayWidth;
-    const h = displayHeight;
-
-    // Reallocate texture if resolution changed
-    if (w !== texWRef.current || h !== texHRef.current) {
-      texDataRef.current = new Uint8Array(w * h * 4);
-      clearBlack(texDataRef.current);
-      texWRef.current = w;
-      texHRef.current = h;
-      cursorRef.current = { x: 0, y: 0 };
-      lastDrawnRef.current = 0;
-    }
-
-    const texData = texDataRef.current;
+    // Write into existing texture — only reallocate when locked resolution differs
     const texW = texWRef.current;
     const texH = texHRef.current;
+    const texData = texDataRef.current;
     const cursor = cursorRef.current;
 
-    // Buffer was trimmed/reset
+    // Buffer was trimmed/reset — just reset cursor, keep existing texture content (noise bleeds through)
     const needsFullRedraw = ioWriteCount < lastDrawnRef.current;
     let startIdx: number;
     if (needsFullRedraw) {
-      clearBlack(texData);
       cursor.x = 0;
       cursor.y = 0;
       startIdx = 0;
@@ -287,12 +270,12 @@ export const VgaDisplay: React.FC<VgaDisplayProps> = ({ ioWrites, ioWriteCount }
         texData[texOff + 3] = 255;
       }
       cursor.x++;
-      if (!hasSyncSignals && cursor.x >= w) { cursor.x = 0; cursor.y++; }
+      if (!hasSyncSignals && cursor.x >= texW) { cursor.x = 0; cursor.y++; }
     }
 
     lastDrawnRef.current = ioWriteCount;
     dirtyRef.current = true;
-  }, [ioWriteCount, resolution.hasSyncSignals, displayWidth, displayHeight, ioWrites]);
+  }, [ioWriteCount, resolution.hasSyncSignals, ioWrites]);
 
   // Force full redraw when user changes scale/width settings
   useEffect(() => {
