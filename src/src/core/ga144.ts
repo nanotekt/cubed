@@ -17,6 +17,7 @@ export class GA144 {
 
   // IO write capture for VGA display
   private ioWriteBuffer: number[] = [];
+  private loadedNodes: Set<number> = new Set();
 
   // ROM data loaded externally
   private romData: Record<number, number[]> = {};
@@ -111,8 +112,10 @@ export class GA144 {
   }
 
   /** Called by F18ANode when an IO register write occurs (VGA DAC output) */
-  onIoWrite(_nodeCoord: number, value: number): void {
-    this.ioWriteBuffer.push(value);
+  onIoWrite(nodeIndex: number, value: number): void {
+    if (this.loadedNodes.size === 0 || this.loadedNodes.has(nodeIndex)) {
+      this.ioWriteBuffer.push(value);
+    }
   }
 
   // ========================================================================
@@ -120,10 +123,12 @@ export class GA144 {
   // ========================================================================
 
   load(compiled: CompiledProgram): void {
+    this.loadedNodes.clear();
     for (const nodeData of compiled.nodes) {
       const index = coordToIndex(nodeData.coord);
       if (index >= 0 && index < NUM_NODES) {
         this.nodes[index].load(nodeData);
+        this.loadedNodes.add(index);
       }
     }
   }
@@ -202,6 +207,7 @@ export class GA144 {
       totalSteps: this.totalSteps,
       selectedNode,
       ioWrites: this.ioWriteBuffer,
+      ioWriteCount: this.ioWriteBuffer.length,
     };
   }
 }

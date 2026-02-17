@@ -22,6 +22,7 @@ interface EmulatorPanelProps {
   stepsPerFrame: number;
   sourceMap: SourceMapEntry[] | null;
   ioWrites: number[];
+  ioWriteCount: number;
   onNodeClick: (coord: number) => void;
   onStep: () => void;
   onStepN: (n: number) => void;
@@ -33,7 +34,7 @@ interface EmulatorPanelProps {
 
 export const EmulatorPanel: React.FC<EmulatorPanelProps> = ({
   nodeStates, nodeCoords, selectedCoord, selectedNode,
-  isRunning, stepsPerFrame, sourceMap, ioWrites,
+  isRunning, stepsPerFrame, sourceMap, ioWrites, ioWriteCount,
   onNodeClick, onStep, onStepN, onRun, onStop, onReset, onSetStepsPerFrame,
 }) => {
   return (
@@ -79,11 +80,21 @@ export const EmulatorPanel: React.FC<EmulatorPanelProps> = ({
             value={stepsPerFrame}
             onChange={(_, v) => onSetStepsPerFrame(v as number)}
             min={1}
-            max={1000}
+            max={10000}
             step={1}
             sx={{ py: 0 }}
           />
         </Box>
+      </Box>
+
+      {/* VGA display — always visible in emulator tab */}
+      <Box sx={{
+        flexShrink: 0,
+        borderBottom: '1px solid #333',
+        maxHeight: '50%',
+        overflow: 'auto',
+      }}>
+        <VgaDisplay ioWrites={ioWrites} ioWriteCount={ioWriteCount} />
       </Box>
 
       {/* Main content: chip grid + node detail */}
@@ -101,11 +112,6 @@ export const EmulatorPanel: React.FC<EmulatorPanelProps> = ({
             selectedCoord={selectedCoord}
             onNodeClick={onNodeClick}
           />
-          {ioWrites.length > 0 && (
-            <Box sx={{ mt: 1 }}>
-              <VgaDisplay ioWrites={ioWrites} />
-            </Box>
-          )}
         </Box>
         <Box sx={{ flex: 1, overflow: 'auto' }}>
           <NodeDetailPanel node={selectedNode} sourceMap={sourceMap} />
